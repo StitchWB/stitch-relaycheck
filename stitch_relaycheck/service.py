@@ -15,9 +15,11 @@ Security contract:
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
-from . import client, crypto, fingerprint, security, storage, watering
+from . import client, crypto, fingerprint, performance, scoring, security, storage, watering
 
 #: Default plugin settings (overridable via ``set_settings``).
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -766,3 +768,334 @@ def scan_security(
         "duration_ms": result["duration_ms"],
         "report_id": report["id"],
     }
+
+
+# ── Performance (Этап 5) ────────────────────────────────────────────────────
+
+
+def measure_performance(
+    db_path: str,
+    *,
+    model: str = "",
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    repeats: int = 5,
+) -> dict[str, Any]:
+    """Measure latency / TTFT / TPS / error rate."""
+    base_url, api_key, target_name, err = _resolve_endpoint(
+        db_path, target_id=target_id, base_url=base_url, api_key=api_key
+    )
+    if err is not None:
+        return err
+    if not model.strip() and target_id:
+        target = storage.get_target(db_path, target_id)
+        if target and target.get("model"):
+            model = str(target["model"]).strip()
+
+    base_url = client.normalize_base_url(base_url)
+    timeout = _timeout(db_path)
+    proto = client.detect_protocol(base_url, api_key, timeout)
+    protocol = proto.get("protocol") or "openai"
+    if not model.strip():
+        models = proto.get("models") or []
+        if models:
+            model = str(models[0]["id"]).strip()
+        else:
+            raise ValueError("model is required for performance measurement")
+    model = model.strip()
+    try:
+        repeats = int(repeats)
+    except (TypeError, ValueError):
+        repeats = 5
+    repeats = max(1, min(20, repeats))
+
+    result = performance.measure(base_url, api_key, model, protocol, timeout, repeats=repeats)
+    verdict = "ok" if result["ok_rate"] > 0 else "error"
+    report = storage.add_report(
+        db_path,
+        kind="performance",
+        target_id=target_id or None,
+        target_name=target_name,
+        base_url=base_url,
+        verdict=verdict,
+        score=result["perf_score"],
+        latency_ms=result["duration_ms"],
+        summary={"model": model, "protocol": protocol, **result},
+    )
+    return {
+        "success": True,
+        "verdict": verdict,
+        **result,
+        "score": result["perf_score"],
+        "report_id": report["id"],
+    }
+
+
+# ── Full audit jobs (Этап 5) ────────────────────────────────────────────────
+
+#: All audit layers, in execution order.
+AUDIT_LAYERS = ("check", "fingerprint", "watering", "security", "performance", "balance")
+
+
+def start_audit_job(
+    db_path: str,
+    *,
+    model: str = "",
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    layers: list[str] | None = None,
+) -> dict[str, Any]:
+    """Start a full audit in a background thread; returns ``job_id`` immediately.
+
+    Use ``get_job`` / ``list_jobs`` to poll progress.  This is the UI-friendly
+    path — the host's 30 s RPC timeout never applies to the audit itself.
+    """
+    base_url, api_key, target_name, err = _resolve_endpoint(
+        db_path, target_id=target_id, base_url=base_url, api_key=api_key
+    )
+    if err is not None:
+        return err
+    if not model.strip() and target_id:
+        target = storage.get_target(db_path, target_id)
+        if target and target.get("model"):
+            model = str(target["model"]).strip()
+
+    base_url = client.normalize_base_url(base_url)
+    timeout = _timeout(db_path)
+    proto = client.detect_protocol(base_url, api_key, timeout)
+    if not model.strip():
+        models = proto.get("models") or []
+        if models:
+            model = str(models[0]["id"]).strip()
+        else:
+            raise ValueError("model is required (endpoint advertises no models)")
+    model = model.strip()
+
+    if layers is None:
+        layers = list(AUDIT_LAYERS)
+    unknown = [layer for layer in layers if layer not in AUDIT_LAYERS]
+    if unknown:
+        raise ValueError(f"unknown audit layers: {', '.join(unknown)}")
+    layers = [layer for layer in AUDIT_LAYERS if layer in layers]  # canonical order
+
+    job = storage.create_job(
+        db_path, kind="audit", target_id=target_id or None, target_name=target_name
+    )
+    thread = threading.Thread(
+        target=_run_audit_job,
+        args=(db_path, job["id"], base_url, api_key, model, target_id, target_name, layers),
+        daemon=True,
+        name=f"relaycheck-audit-{job['id']}",
+    )
+    thread.start()
+    return {"success": True, "job_id": job["id"], "status": "queued", "model": model}
+
+
+def _run_audit_job(
+    db_path: str,
+    job_id: str,
+    base_url: str,
+    api_key: str,
+    model: str,
+    target_id: str,
+    target_name: str,
+    layers: list[str],
+) -> None:
+    """Background worker: runs audit layers sequentially, writes reports."""
+    storage.update_job(db_path, job_id, status="running", progress="starting")
+    results: dict[str, Any] = {}
+    try:
+        for idx, layer in enumerate(layers):
+            storage.update_job(
+                db_path, job_id, progress=f"{layer} ({idx + 1}/{len(layers)})"
+            )
+            if layer == "check":
+                r = quick_check(db_path, base_url, api_key, model=model)
+                results[layer] = {
+                    "success": bool(r.get("success")),
+                    "verdict": r.get("verdict", "ok" if r.get("success") else "error"),
+                    "report_id": r.get("report_id"),
+                }
+            elif layer == "fingerprint":
+                r = verify_model(
+                    db_path, model=model, target_id=target_id,
+                    base_url=base_url, api_key=api_key,
+                )
+                results[layer] = _slim(r)
+            elif layer == "watering":
+                r = detect_watering(
+                    db_path, model=model, target_id=target_id,
+                    base_url=base_url, api_key=api_key,
+                )
+                results[layer] = _slim(r)
+            elif layer == "security":
+                r = scan_security(
+                    db_path, model=model, target_id=target_id,
+                    base_url=base_url, api_key=api_key,
+                )
+                results[layer] = _slim(r)
+            elif layer == "performance":
+                r = measure_performance(
+                    db_path, model=model, target_id=target_id,
+                    base_url=base_url, api_key=api_key,
+                )
+                results[layer] = _slim(r)
+            elif layer == "balance":
+                r = get_balance(
+                    db_path, target_id=target_id, base_url=base_url, api_key=api_key
+                )
+                results[layer] = {
+                    "success": bool(r.get("success")),
+                    "verdict": r.get("verdict"),
+                    "report_id": r.get("report_id"),
+                }
+
+        trust = scoring.trust_from_layers(results)
+        report = storage.add_report(
+            db_path,
+            kind="audit",
+            target_id=target_id or None,
+            target_name=target_name,
+            base_url=base_url,
+            verdict=trust["grade"],
+            score=trust["score"],
+            summary={"layers": results, "trust": trust, "model": model},
+        )
+        results["trust"] = trust
+        results["report_id"] = report["id"]
+        storage.update_job(db_path, job_id, status="done", progress="done", result=results)
+    except Exception as exc:  # noqa: BLE001 — job must always reach a terminal state
+        storage.update_job(
+            db_path, job_id, status="error", progress="error", error_text=str(exc)
+        )
+
+
+def _slim(r: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the fields the trust score and job result need."""
+    out = {
+        "success": bool(r.get("success")),
+        "verdict": r.get("verdict"),
+        "report_id": r.get("report_id"),
+    }
+    if "score" in r:
+        out["score"] = r["score"]
+    if "risk_score" in r:
+        out["risk_score"] = r["risk_score"]
+    return out
+
+
+def run_full_audit(
+    db_path: str,
+    *,
+    model: str = "",
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    layers: list[str] | None = None,
+    wait_seconds: float = 120.0,
+) -> dict[str, Any]:
+    """Synchronous convenience wrapper: start a job and block until it finishes.
+
+    Prefer ``start_audit_job`` + polling from the UI — this call can exceed
+    the host's RPC timeout on slow endpoints.
+    """
+    started = start_audit_job(
+        db_path, model=model, target_id=target_id,
+        base_url=base_url, api_key=api_key, layers=layers,
+    )
+    if not started.get("success"):
+        return started
+    job_id = started["job_id"]
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        job = storage.get_job(db_path, job_id)
+        if job is None:
+            return {"success": False, "error_text": f"job {job_id!r} not found"}
+        if job["status"] in ("done", "error"):
+            return {"success": True, "job": job}
+        time.sleep(0.5)
+    return {
+        "success": False,
+        "error_text": "audit did not finish in time (job still running)",
+        "job_id": job_id,
+    }
+
+
+def get_job(db_path: str, job_id: str) -> dict[str, Any]:
+    if not job_id:
+        raise ValueError("jobId is required")
+    job = storage.get_job(db_path, job_id)
+    if job is None:
+        return {"success": False, "error_text": f"job {job_id!r} not found"}
+    return {"success": True, "job": job}
+
+
+def list_jobs(db_path: str, limit: int = 30) -> dict[str, Any]:
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 30
+    return {"rows": storage.list_jobs(db_path, limit=limit)}
+
+
+# ── Target comparison (Этап 5) ──────────────────────────────────────────────
+
+
+def _trust_for_target(db_path: str, target_id: str) -> dict[str, Any]:
+    """Trust score from the target's latest per-layer reports."""
+    kinds = ["fingerprint", "watering", "security", "performance", "balance"]
+    latest = storage.latest_reports_by_kind(db_path, target_id, kinds)
+    scores: dict[str, float | None] = {}
+    for kind, report in latest.items():
+        verdict = report.get("verdict")
+        score = report.get("score")
+        score = score if isinstance(score, (int, float)) else None
+        if kind == "fingerprint":
+            if verdict == "error":
+                scores[kind] = 0.0
+            elif verdict == "indeterminate" or score is None:
+                scores[kind] = 50.0
+            else:
+                scores[kind] = float(score)
+        elif kind in ("watering", "security"):
+            if verdict == "error" or score is None:
+                scores[kind] = 0.0
+            else:
+                scores[kind] = float(100 - score)
+        elif kind == "performance":
+            scores[kind] = 0.0 if verdict == "error" or score is None else float(score)
+        elif kind == "balance":
+            scores[kind] = 100.0 if verdict == "ok" else 40.0
+    return scoring.trust_from_scores(scores)
+
+
+def compare_targets(
+    db_path: str, *, target_id_a: str, target_id_b: str
+) -> dict[str, Any]:
+    """Side-by-side comparison of two saved targets (latest reports + trust)."""
+    if not target_id_a or not target_id_b:
+        raise ValueError("targetIdA and targetIdB are required")
+    out: dict[str, Any] = {}
+    for label, tid in (("a", target_id_a), ("b", target_id_b)):
+        target = storage.get_target(db_path, tid)
+        if target is None:
+            return {"success": False, "error_text": f"target {tid!r} not found"}
+        kinds = ["fingerprint", "watering", "security", "performance", "balance"]
+        latest = storage.latest_reports_by_kind(db_path, tid, kinds)
+        layers = {
+            kind: {"verdict": r["verdict"], "score": r["score"], "at": r["created_at"]}
+            for kind, r in latest.items()
+        }
+        out[label] = {
+            "target": {
+                "id": tid,
+                "name": target["name"],
+                "base_url": target["base_url"],
+                "model": target["model"],
+            },
+            "layers": layers,
+            "trust": _trust_for_target(db_path, tid),
+        }
+    return {"success": True, **out}

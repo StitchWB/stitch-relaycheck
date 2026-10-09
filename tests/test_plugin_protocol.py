@@ -247,3 +247,16 @@ def test_scan_security_validates_params(plugin: PluginProc) -> None:
         )
     assert excinfo.value.error["code"] == -32603
     plugin.request("plugin.shutdown")
+
+
+def test_start_audit_job_validates_params(plugin: PluginProc) -> None:
+    """start_audit_job without any endpoint → JSON-RPC error."""
+    plugin.init()
+    plugin.request("plugin.ping")
+    with pytest.raises(RpcError) as excinfo:
+        plugin.request(
+            "plugin.call",
+            {"name": "start_audit_job", "params": {}},
+        )
+    assert excinfo.value.error["code"] == -32603
+    plugin.request("plugin.shutdown")

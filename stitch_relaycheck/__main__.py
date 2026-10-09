@@ -178,6 +178,70 @@ def _handle_verify_model(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _handle_measure_performance(params: dict[str, Any]) -> dict[str, Any]:
+    """Measure latency / TTFT / TPS / error rate."""
+    return service.measure_performance(
+        ctx.db_path,
+        model=str(params.get("model", "") or ""),
+        target_id=str(params.get("targetId", params.get("target_id", "")) or ""),
+        base_url=str(params.get("baseUrl", params.get("base_url", ""))),
+        api_key=str(params.get("apiKey", params.get("api_key", ""))),
+        repeats=params.get("repeats", 5),
+    )
+
+
+def _handle_start_audit_job(params: dict[str, Any]) -> dict[str, Any]:
+    """Start a full audit in the background; returns job_id immediately."""
+    layers = params.get("layers")
+    if layers is not None and not isinstance(layers, list):
+        raise ValueError("layers must be a list")
+    return service.start_audit_job(
+        ctx.db_path,
+        model=str(params.get("model", "") or ""),
+        target_id=str(params.get("targetId", params.get("target_id", "")) or ""),
+        base_url=str(params.get("baseUrl", params.get("base_url", ""))),
+        api_key=str(params.get("apiKey", params.get("api_key", ""))),
+        layers=layers,
+    )
+
+
+def _handle_run_full_audit(params: dict[str, Any]) -> dict[str, Any]:
+    """Synchronous full audit (start + block until done)."""
+    layers = params.get("layers")
+    if layers is not None and not isinstance(layers, list):
+        raise ValueError("layers must be a list")
+    return service.run_full_audit(
+        ctx.db_path,
+        model=str(params.get("model", "") or ""),
+        target_id=str(params.get("targetId", params.get("target_id", "")) or ""),
+        base_url=str(params.get("baseUrl", params.get("base_url", ""))),
+        api_key=str(params.get("apiKey", params.get("api_key", ""))),
+        layers=layers,
+        wait_seconds=float(params.get("waitSeconds", params.get("wait_seconds", 120))),
+    )
+
+
+def _handle_get_job(params: dict[str, Any]) -> dict[str, Any]:
+    """Get one audit job by id."""
+    return service.get_job(
+        ctx.db_path, str(params.get("jobId", params.get("job_id", "")))
+    )
+
+
+def _handle_list_jobs(params: dict[str, Any]) -> dict[str, Any]:
+    """List recent audit jobs."""
+    return service.list_jobs(ctx.db_path, limit=params.get("limit", 30))
+
+
+def _handle_compare_targets(params: dict[str, Any]) -> dict[str, Any]:
+    """Side-by-side comparison of two saved targets."""
+    return service.compare_targets(
+        ctx.db_path,
+        target_id_a=str(params.get("targetIdA", params.get("target_id_a", ""))),
+        target_id_b=str(params.get("targetIdB", params.get("target_id_b", ""))),
+    )
+
+
 def _handle_get_settings(params: dict[str, Any]) -> dict[str, Any]:
     """Return effective plugin settings."""
     return {"success": True, "settings": service.get_settings(ctx.db_path)}
@@ -259,6 +323,12 @@ def main() -> None:
     server.register("detect_watering", _handle_detect_watering)
     server.register("get_balance", _handle_get_balance)
     server.register("scan_security", _handle_scan_security)
+    server.register("measure_performance", _handle_measure_performance)
+    server.register("start_audit_job", _handle_start_audit_job)
+    server.register("run_full_audit", _handle_run_full_audit)
+    server.register("get_job", _handle_get_job)
+    server.register("list_jobs", _handle_list_jobs)
+    server.register("compare_targets", _handle_compare_targets)
     server.register("refresh", _handle_refresh)
     server.register("get_settings", _handle_get_settings)
     server.register("set_settings", _handle_set_settings)

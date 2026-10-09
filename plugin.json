@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -17,8 +17,8 @@
   "outputs": [],
   "signature": "",
   "description": {
-    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, fingerprint оригинальности модели, детект «водности» ответов, security-скан (canary-пробы, инъекции tool_use, правила HoloNe, IOC/TLS), баланс панелей, история и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn.",
-    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, model authenticity fingerprint, answer watering detection, security scan (canary probes, tool_use injection, HoloNe rules, IOC/TLS), balance lookup, history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available."
+    "ru": "Локальный аудит AI-провайдеров и relay-станций: быстрый чек, fingerprint оригинальности модели, детект «водности» ответов, security-скан (canary, инъекции tool_use, правила HoloNe, IOC/TLS), производительность (latency/TTFT/TPS), баланс, полный аудит с trust score, сравнение целей. Ключи шифруются at-rest (Fernet) и не покидают машину.",
+    "en": "Local auditor for AI providers and relay stations: quick check, model authenticity fingerprint, answer watering detection, security scan (canary, tool_use injection, HoloNe rules, IOC/TLS), performance (latency/TTFT/TPS), balance, full audit with trust score, target comparison. Keys are encrypted at rest (Fernet) and never leave the machine."
   },
   "author": "StitchWB",
   "category": "ai-tools",
@@ -73,9 +73,26 @@
         "en": "Security scan: canary probes, tool_use injection, HoloNe rules, IOC/TLS"
       },
       "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "Полный аудит (фоновые jobs), trust score, производительность, сравнение целей",
+        "en": "Full audit (background jobs), trust score, performance, target comparison"
+      },
+      "status": "beta"
     }
   ],
   "changelog": [
+    {
+      "version": "0.5.0",
+      "date": "2026-10-09",
+      "changes": [
+        {
+          "ru": "Полный аудит: start_audit_job/run_full_audit (фоновый thread, слои check+fingerprint+watering+security+performance+balance), trust score с грейдом A–F, measure_performance (latency/TTFT/TPS), compare_targets, таблица jobs в UI",
+          "en": "Full audit: start_audit_job/run_full_audit (background thread, layers check+fingerprint+watering+security+performance+balance), trust score with A–F grade, measure_performance (latency/TTFT/TPS), compare_targets, jobs table in UI"
+        }
+      ]
+    },
     {
       "version": "0.4.0",
       "date": "2026-10-09",
@@ -186,6 +203,30 @@
       {
         "name": "set_settings",
         "readonly": false
+      },
+      {
+        "name": "measure_performance",
+        "readonly": false
+      },
+      {
+        "name": "start_audit_job",
+        "readonly": false
+      },
+      {
+        "name": "run_full_audit",
+        "readonly": false
+      },
+      {
+        "name": "get_job",
+        "readonly": true
+      },
+      {
+        "name": "list_jobs",
+        "readonly": true
+      },
+      {
+        "name": "compare_targets",
+        "readonly": true
       }
     ],
     "ui": {
@@ -298,6 +339,23 @@
                   "model": "qc-model"
                 },
                 "variant": "secondary"
+              },
+              {
+                "kind": "button",
+                "id": "qc-audit-btn",
+                "label": "stitch-relaycheck.quick.audit",
+                "command": "start_audit_job",
+                "params": {
+                  "baseUrl": "",
+                  "apiKey": "",
+                  "model": ""
+                },
+                "paramsFrom": {
+                  "baseUrl": "qc-url",
+                  "apiKey": "qc-key",
+                  "model": "qc-model"
+                },
+                "variant": "secondary"
               }
             ]
           },
@@ -342,6 +400,19 @@
                   "command": "list_targets"
                 },
                 "rowActions": [
+                  {
+                    "id": "audit-target-row",
+                    "label": "stitch-relaycheck.targets.audit",
+                    "command": "start_audit_job",
+                    "params": {
+                      "model": ""
+                    },
+                    "paramsFromRow": {
+                      "targetId": "id",
+                      "model": "model"
+                    },
+                    "variant": "primary"
+                  },
                   {
                     "id": "check-target-row",
                     "label": "stitch-relaycheck.targets.check",
@@ -527,6 +598,47 @@
           },
           {
             "kind": "section",
+            "title": "stitch-relaycheck.jobs.title",
+            "nodes": [
+              {
+                "kind": "table",
+                "id": "jobs",
+                "columns": [
+                  {
+                    "key": "created_at",
+                    "label": "stitch-relaycheck.jobs.col.date"
+                  },
+                  {
+                    "key": "target",
+                    "label": "stitch-relaycheck.jobs.col.target"
+                  },
+                  {
+                    "key": "status",
+                    "label": "stitch-relaycheck.jobs.col.status"
+                  },
+                  {
+                    "key": "progress",
+                    "label": "stitch-relaycheck.jobs.col.progress"
+                  }
+                ],
+                "source": {
+                  "command": "list_jobs"
+                },
+                "rowActions": [
+                  {
+                    "id": "refresh-jobs-row",
+                    "label": "stitch-relaycheck.jobs.refresh",
+                    "command": "refresh",
+                    "paramsFromRow": {
+                      "jobId": "id"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "section",
             "title": "stitch-relaycheck.report.title",
             "nodes": [
               {
@@ -596,7 +708,8 @@
             "check": "Проверить",
             "fingerprint": "Fingerprint модели",
             "water": "Водность ответов",
-            "scan": "Скан безопасности"
+            "scan": "Скан безопасности",
+            "audit": "Полный аудит"
           },
           "targets": {
             "title": "Мои цели (relay)",
@@ -614,7 +727,8 @@
             "water": "Вода",
             "balance": "Баланс",
             "delete": "Удалить",
-            "scan": "Скан"
+            "scan": "Скан",
+            "audit": "Аудит"
           },
           "addTarget": {
             "title": "Добавить цель",
@@ -648,6 +762,16 @@
             "timeout": "Таймаут запросов, с",
             "persistKeys": "Сохранять ключи целей (шифрованно)",
             "save": "Сохранить настройки"
+          },
+          "jobs": {
+            "title": "Задачи (аудит)",
+            "col": {
+              "date": "Дата",
+              "target": "Цель",
+              "status": "Статус",
+              "progress": "Прогресс"
+            },
+            "refresh": "Обновить"
           }
         }
       },
@@ -666,7 +790,8 @@
             "check": "Check",
             "fingerprint": "Fingerprint model",
             "water": "Watering check",
-            "scan": "Security scan"
+            "scan": "Security scan",
+            "audit": "Full audit"
           },
           "targets": {
             "title": "My targets (relays)",
@@ -684,7 +809,8 @@
             "water": "Water",
             "balance": "Balance",
             "delete": "Delete",
-            "scan": "Scan"
+            "scan": "Scan",
+            "audit": "Audit"
           },
           "addTarget": {
             "title": "Add target",
@@ -718,6 +844,16 @@
             "timeout": "Request timeout, s",
             "persistKeys": "Store target keys (encrypted)",
             "save": "Save settings"
+          },
+          "jobs": {
+            "title": "Jobs (audit)",
+            "col": {
+              "date": "Date",
+              "target": "Target",
+              "status": "Status",
+              "progress": "Progress"
+            },
+            "refresh": "Refresh"
           }
         }
       }

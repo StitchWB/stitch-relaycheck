@@ -89,6 +89,22 @@ def migrate(db_path: str) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                target_id TEXT,
+                target_name TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress TEXT NOT NULL DEFAULT '',
+                result_json TEXT NOT NULL DEFAULT '{}',
+                error_text TEXT,
+                created_at TEXT NOT NULL,
+                finished_at TEXT
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -367,5 +383,134 @@ def set_setting(db_path: str, key: str, value: str) -> None:
             (key, value),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Jobs (long-running audits) ──────────────────────────────────────────────
+
+
+def create_job(
+    db_path: str,
+    *,
+    kind: str,
+    target_id: str | None = None,
+    target_name: str = "",
+) -> dict[str, Any]:
+    conn = connect_plugin_db(db_path)
+    try:
+        jid = _new_id()
+        conn.execute(
+            """
+            INSERT INTO jobs (id, target_id, target_name, kind, status, created_at)
+            VALUES (?, ?, ?, ?, 'queued', ?)
+            """,
+            (jid, target_id, target_name, kind, _utcnow()),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (jid,)).fetchone()
+        return _job_row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def get_job(db_path: str, job_id: str) -> dict[str, Any] | None:
+    conn = connect_plugin_db(db_path)
+    try:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return _job_row_to_dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def list_jobs(db_path: str, limit: int = 30) -> list[dict[str, Any]]:
+    conn = connect_plugin_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [_job_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_job(
+    db_path: str,
+    job_id: str,
+    *,
+    status: str | None = None,
+    progress: str | None = None,
+    result: dict[str, Any] | None = None,
+    error_text: str | None = None,
+) -> None:
+    conn = connect_plugin_db(db_path)
+    try:
+        sets = []
+        params: list[Any] = []
+        if status is not None:
+            sets.append("status = ?")
+            params.append(status)
+        if progress is not None:
+            sets.append("progress = ?")
+            params.append(progress)
+        if result is not None:
+            sets.append("result_json = ?")
+            params.append(json.dumps(result, ensure_ascii=False))
+        if error_text is not None:
+            sets.append("error_text = ?")
+            params.append(error_text)
+        if status in ("done", "error"):
+            sets.append("finished_at = ?")
+            params.append(_utcnow())
+        if not sets:
+            return
+        params.append(job_id)
+        conn.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", params)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _job_row_to_dict(row: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "id": row["id"],
+        "target_id": row["target_id"],
+        "target": row["target_name"] or "—",
+        "kind": row["kind"],
+        "status": row["status"],
+        "progress": row["progress"],
+        "error_text": row["error_text"],
+        "created_at": row["created_at"],
+        "finished_at": row["finished_at"],
+    }
+    try:
+        out["result"] = json.loads(row["result_json"])
+    except (json.JSONDecodeError, TypeError):
+        out["result"] = {}
+    return out
+
+
+# ── Latest report per kind (for target comparison) ──────────────────────────
+
+
+def latest_reports_by_kind(
+    db_path: str, target_id: str, kinds: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Return {kind: latest report row} for a target."""
+    conn = connect_plugin_db(db_path)
+    try:
+        out: dict[str, dict[str, Any]] = {}
+        for kind in kinds:
+            row = conn.execute(
+                """
+                SELECT * FROM reports
+                WHERE target_id = ? AND kind = ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (target_id, kind),
+            ).fetchone()
+            if row is not None:
+                out[kind] = _report_row_to_dict(row)
+        return out
     finally:
         conn.close()
