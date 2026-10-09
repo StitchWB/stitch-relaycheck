@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -17,8 +17,8 @@
   "outputs": [],
   "signature": "",
   "description": {
-    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, fingerprint оригинальности модели, детект «водности» ответов, баланс панелей, история и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn. Далее — security-скан по правилам HoloNe.",
-    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, model authenticity fingerprint, answer watering detection, balance lookup, history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available. Next: HoloNe-rule security scan."
+    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, fingerprint оригинальности модели, детект «водности» ответов, security-скан (canary-пробы, инъекции tool_use, правила HoloNe, IOC/TLS), баланс панелей, история и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn.",
+    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, model authenticity fingerprint, answer watering detection, security scan (canary probes, tool_use injection, HoloNe rules, IOC/TLS), balance lookup, history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available."
   },
   "author": "StitchWB",
   "category": "ai-tools",
@@ -66,9 +66,26 @@
         "en": "Read-only balance/quota lookup (one-api/new-api, LiteLLM)"
       },
       "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "Security-скан: canary-пробы, инъекции tool_use, правила HoloNe, IOC/TLS",
+        "en": "Security scan: canary probes, tool_use injection, HoloNe rules, IOC/TLS"
+      },
+      "status": "beta"
     }
   ],
   "changelog": [
+    {
+      "version": "0.4.0",
+      "date": "2026-10-09",
+      "changes": [
+        {
+          "ru": "Security-скан (scan_security): canary-пробы, детект неспрашиваемого tool_use, инъекционные пробы, вендowany движок правил HoloNe (105 правил v4 + blocklist), IOC и TLS-проверки, risk score; скрипт синка правил scripts/sync_holone_rules.py",
+          "en": "Security scan (scan_security): canary probes, unsolicited tool_use detection, injection probes, vendored HoloNe rules engine (105 rules v4 + blocklist), IOC and TLS checks, risk score; rules sync script scripts/sync_holone_rules.py"
+        }
+      ]
+    },
     {
       "version": "0.3.0",
       "date": "2026-10-09",
@@ -136,6 +153,10 @@
       },
       {
         "name": "get_balance",
+        "readonly": false
+      },
+      {
+        "name": "scan_security",
         "readonly": false
       },
       {
@@ -260,6 +281,23 @@
                   "model": "qc-model"
                 },
                 "variant": "secondary"
+              },
+              {
+                "kind": "button",
+                "id": "qc-scan-btn",
+                "label": "stitch-relaycheck.quick.scan",
+                "command": "scan_security",
+                "params": {
+                  "baseUrl": "",
+                  "apiKey": "",
+                  "model": ""
+                },
+                "paramsFrom": {
+                  "baseUrl": "qc-url",
+                  "apiKey": "qc-key",
+                  "model": "qc-model"
+                },
+                "variant": "secondary"
               }
             ]
           },
@@ -328,6 +366,18 @@
                     "id": "water-target-row",
                     "label": "stitch-relaycheck.targets.water",
                     "command": "detect_watering",
+                    "params": {
+                      "model": ""
+                    },
+                    "paramsFromRow": {
+                      "targetId": "id",
+                      "model": "model"
+                    }
+                  },
+                  {
+                    "id": "scan-target-row",
+                    "label": "stitch-relaycheck.targets.scan",
+                    "command": "scan_security",
                     "params": {
                       "model": ""
                     },
@@ -545,7 +595,8 @@
             "modelPlaceholder": "например, claude-opus-4-8",
             "check": "Проверить",
             "fingerprint": "Fingerprint модели",
-            "water": "Водность ответов"
+            "water": "Водность ответов",
+            "scan": "Скан безопасности"
           },
           "targets": {
             "title": "Мои цели (relay)",
@@ -562,7 +613,8 @@
             "fingerprint": "Fingerprint",
             "water": "Вода",
             "balance": "Баланс",
-            "delete": "Удалить"
+            "delete": "Удалить",
+            "scan": "Скан"
           },
           "addTarget": {
             "title": "Добавить цель",
@@ -613,7 +665,8 @@
             "modelPlaceholder": "e.g. claude-opus-4-8",
             "check": "Check",
             "fingerprint": "Fingerprint model",
-            "water": "Watering check"
+            "water": "Watering check",
+            "scan": "Security scan"
           },
           "targets": {
             "title": "My targets (relays)",
@@ -630,7 +683,8 @@
             "fingerprint": "Fingerprint",
             "water": "Water",
             "balance": "Balance",
-            "delete": "Delete"
+            "delete": "Delete",
+            "scan": "Scan"
           },
           "addTarget": {
             "title": "Add target",

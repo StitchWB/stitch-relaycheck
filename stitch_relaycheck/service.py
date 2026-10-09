@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import client, crypto, fingerprint, storage, watering
+from . import client, crypto, fingerprint, security, storage, watering
 
 #: Default plugin settings (overridable via ``set_settings``).
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -258,6 +258,8 @@ def get_report_markdown(db_path: str, report_id: str = "latest") -> dict[str, An
     report = outcome["report"]
     if report["kind"] == "fingerprint":
         return {"text": _render_fingerprint_markdown(report)}
+    if report["kind"] == "security":
+        return {"text": _render_security_markdown(report)}
     summary = report.get("summary", {})
 
     lines = [
@@ -356,6 +358,90 @@ def _render_fingerprint_markdown(report: dict[str, Any]) -> str:
         f"- **ID prefix:** `{meta.get('id_prefix') or '—'}`",
         "",
         "> Вердикт — эвристика, не доказательство. Ручная проверка на реальных задачах обязательна.",
+    ]
+    return "\n".join(lines)
+
+
+#: Russian labels for security risk verdicts.
+_SECURITY_LABELS_RU = {
+    "clean": "clean — угроз не найдено",
+    "low": "low — слабые сигналы",
+    "medium": "medium — подозрительно",
+    "high": "high — опасно",
+    "critical": "critical — критично",
+    "error": "error — техническая ошибка",
+}
+
+
+def _render_security_markdown(report: dict[str, Any]) -> str:
+    """Render a security scan report: risk verdict, findings, IOC, TLS."""
+    s = report.get("summary", {})
+    verdict = report.get("verdict") or "—"
+    label = _SECURITY_LABELS_RU.get(verdict, verdict)
+    lines = [
+        "# RelayCheck: security-скан",
+        "",
+        f"- **Дата:** {report['created_at']}",
+        f"- **Цель:** {report['target']}",
+        f"- **Модель:** `{s.get('model', '—')}`",
+        f"- **Вердикт:** {label}",
+        f"- **Risk score:** {report['score']} / 100 (0 = чисто)",
+        f"- **Проб:** {s.get('probe_count', '—')} · **Длительность:** {report['latency_ms']} мс",
+        f"- **Правил HoloNe:** v{s.get('rules_version', '?')} · скомпилировано {s.get('rules_compiled', '?')}"
+        + (f" · пропущено {s.get('rules_skipped')}" if s.get("rules_skipped") else ""),
+        "",
+    ]
+
+    findings = s.get("findings") or []
+    if findings:
+        lines += [
+            "## Находки",
+            "",
+            "| Правило | Severity | Источник | Фрагмент |",
+            "| --- | --- | --- | --- |",
+        ]
+        for f in findings[:30]:
+            excerpt = str(f.get("excerpt", "")).replace("|", "\\|")
+            lines.append(
+                f"| `{f.get('rule_id', '?')}` | {f.get('severity', '?')} "
+                f"| {f.get('source', '?')} | {excerpt[:100]} |"
+            )
+        if len(findings) > 30:
+            lines.append(f"| … и ещё {len(findings) - 30} | | | |")
+    else:
+        lines += ["## Находки", "", "Ничего не найдено."]
+
+    ioc = s.get("ioc") or {}
+    tls = s.get("tls") or {}
+    lines += [
+        "",
+        "## Сеть",
+        "",
+        f"- **Host:** `{ioc.get('host', '—')}` · блоклист: {ioc.get('blocklist_size', 0)} записей"
+        + (f" · **совпадения:** {ioc.get('matches')}" if ioc.get("matches") else " · совпадений нет"),
+    ]
+    if tls.get("plain_http"):
+        lines.append("- **TLS:** ❌ plain HTTP — ключ уходит незашифрованным")
+    elif tls.get("ok"):
+        lines += [
+            f"- **TLS:** ✅ issuer={tls.get('issuer') or '—'} · до {tls.get('not_after') or '—'}"
+            + ("" if tls.get("san_match", True) else " · ⚠️ SAN не покрывает host"),
+        ]
+    else:
+        lines.append(f"- **TLS:** ⚠️ {tls.get('detail', 'недоступно')}")
+
+    canary = s.get("canary") or []
+    injection = s.get("injection") or []
+    lines += [
+        "",
+        "## Probes",
+        "",
+        f"- **Canary:** {sum(1 for c in canary if c.get('ok'))}/{len(canary)} ответили"
+        + (f" · ⚠️ tool_use без запроса: {sum(1 for c in canary if c.get('findings'))}" if any(c.get("findings") for c in canary) else ""),
+        f"- **Injection:** {sum(1 for i in injection if i.get('triggered'))} сработали из {len(injection)}",
+        "",
+        "> Скан — эвристика, не гарантия: чистый результат не доказывает честность провайдера "
+        "(пассивный слив промптов не детектится). Самый безопасный вариант — официальный endpoint.",
     ]
     return "\n".join(lines)
 
@@ -598,3 +684,85 @@ def get_balance(
         summary={"balance": result.get("balance"), "error_text": result.get("error_text")},
     )
     return {**result, "report_id": report["id"]}
+
+
+# ── Security scan (Этап 4) ──────────────────────────────────────────────────
+
+
+def scan_security(
+    db_path: str,
+    *,
+    model: str = "",
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+) -> dict[str, Any]:
+    """Security scan of an endpoint: canary, injection probes, IOC, TLS.
+
+    ``model`` is optional — falls back to the target's default model, then to
+    the first model the endpoint advertises.
+    """
+    base_url, api_key, target_name, err = _resolve_endpoint(
+        db_path, target_id=target_id, base_url=base_url, api_key=api_key
+    )
+    if err is not None:
+        return err
+    if not model.strip() and target_id:
+        target = storage.get_target(db_path, target_id)
+        if target and target.get("model"):
+            model = str(target["model"]).strip()
+
+    base_url = client.normalize_base_url(base_url)
+    timeout = _timeout(db_path)
+    proto = client.detect_protocol(base_url, api_key, timeout)
+    protocol = proto.get("protocol") or "openai"
+    if not model.strip():
+        models = proto.get("models") or []
+        if models:
+            model = str(models[0]["id"]).strip()
+        else:
+            return {
+                "success": False,
+                "error_text": "model is required (endpoint advertises no models)",
+            }
+    model = model.strip()
+
+    result = security.run_security_scan(base_url, api_key, model, protocol, timeout)
+    report = storage.add_report(
+        db_path,
+        kind="security",
+        target_id=target_id or None,
+        target_name=target_name,
+        base_url=base_url,
+        verdict=result["verdict"],
+        score=result["risk_score"],
+        latency_ms=result["duration_ms"],
+        summary={
+            "model": model,
+            "protocol": protocol,
+            "reasons": result["reasons"],
+            "findings": result["findings"],
+            "ioc": result["ioc"],
+            "tls": result["tls"],
+            "canary": result["canary"],
+            "injection": result["injection"],
+            "probe_count": result["probe_count"],
+            "rules_version": result["rules_version"],
+            "rules_compiled": result["rules_compiled"],
+            "rules_skipped": result["rules_skipped"],
+        },
+    )
+    return {
+        "success": True,
+        "verdict": result["verdict"],
+        "risk_score": result["risk_score"],
+        "reasons": result["reasons"],
+        "findings": result["findings"],
+        "ioc": result["ioc"],
+        "tls": result["tls"],
+        "canary": result["canary"],
+        "injection": result["injection"],
+        "probe_count": result["probe_count"],
+        "duration_ms": result["duration_ms"],
+        "report_id": report["id"],
+    }

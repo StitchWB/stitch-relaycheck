@@ -413,3 +413,73 @@ class TestBalance:
     def test_target_resolution_error(self, env):
         out = service.get_balance(env, target_id="nope")
         assert out["success"] is False
+
+
+def _fake_security_result(verdict="clean", risk=0):
+    return {
+        "model": "mock-gpt",
+        "risk_score": risk,
+        "verdict": verdict,
+        "reasons": [],
+        "findings": [],
+        "ioc": {"host": "a.com", "matches": [], "blocklist_size": 0},
+        "tls": {"ok": True, "plain_http": False, "san_match": True},
+        "canary": [{"id": "canary_story", "ok": True, "findings": []}],
+        "injection": [],
+        "probe_count": 4,
+        "duration_ms": 900,
+        "rules_version": 4,
+        "rules_compiled": 105,
+        "rules_skipped": 0,
+    }
+
+
+class TestScanSecurity:
+    def test_adhoc_requires_url_and_key(self, env):
+        with pytest.raises(ValueError):
+            service.scan_security(env, model="", base_url="", api_key="")
+
+    def test_model_fallback_to_first_advertised(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client,
+            "detect_protocol",
+            lambda *a, **k: {"success": True, "protocol": "openai", "models": [{"id": "mock-gpt"}]},
+        )
+        captured = {}
+
+        def fake_scan(base_url, api_key, model, protocol, timeout, ruleset=None):
+            captured["model"] = model
+            return _fake_security_result(verdict="medium", risk=20)
+
+        monkeypatch.setattr("stitch_relaycheck.security.run_security_scan", fake_scan)
+        result = service.scan_security(env, model="", base_url="https://a.com", api_key="sk-x")
+        assert result["success"] is True
+        assert result["verdict"] == "medium"
+        assert captured["model"] == "mock-gpt"
+        report = storage.get_report(env, result["report_id"])
+        assert report is not None
+        assert report["kind"] == "security"
+        assert report["score"] == 20
+
+    def test_no_models_is_error_result(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client,
+            "detect_protocol",
+            lambda *a, **k: {"success": True, "protocol": "openai", "models": []},
+        )
+        out = service.scan_security(env, model="", base_url="https://a.com", api_key="sk-x")
+        assert out["success"] is False
+        assert "model" in out["error_text"]
+
+    def test_security_markdown(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client, "detect_protocol", lambda *a, **k: {"success": True, "protocol": "openai", "models": []}
+        )
+        monkeypatch.setattr(
+            "stitch_relaycheck.security.run_security_scan",
+            lambda *a, **k: _fake_security_result(verdict="clean", risk=0),
+        )
+        service.scan_security(env, model="mock-gpt", base_url="https://a.com", api_key="sk-x")
+        md = service.get_report_markdown(env, "latest")
+        assert "security-скан" in md["text"]
+        assert "clean" in md["text"]

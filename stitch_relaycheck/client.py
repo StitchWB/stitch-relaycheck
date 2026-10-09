@@ -313,6 +313,7 @@ def _normalize_chat_payload(
         "usage": None,
         "finish_reason": None,
         "response_id": None,
+        "tool_calls": [],
     }
     try:
         if protocol == "anthropic":
@@ -323,6 +324,18 @@ def _normalize_chat_payload(
                     for b in blocks
                     if isinstance(b, dict) and b.get("type") == "text"
                 )
+                tool_uses = []
+                for block in blocks:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_uses.append(
+                            {
+                                "name": block.get("name", "?"),
+                                "arguments": json.dumps(
+                                    block.get("input", {}), ensure_ascii=False
+                                ),
+                            }
+                        )
+                out["tool_calls"] = tool_uses
             out["model_echo"] = data.get("model")
             usage = data.get("usage")
             if isinstance(usage, dict):
@@ -342,6 +355,9 @@ def _normalize_chat_payload(
                     message = first.get("message")
                     if isinstance(message, dict):
                         out["text"] = _extract_text_from_content(message.get("content"))
+                        tool_calls = message.get("tool_calls")
+                        if isinstance(tool_calls, list):
+                            out["tool_calls"] = tool_calls
                     out["finish_reason"] = first.get("finish_reason")
             out["model_echo"] = data.get("model")
             out["system_fingerprint"] = data.get("system_fingerprint")
@@ -468,6 +484,7 @@ def chat_completion(
             model_echo: str | None = None
             system_fingerprint: str | None = None
             usage: dict[str, Any] | None = None
+            tool_calls: list[dict[str, Any]] = []
             with http.stream("POST", url, headers=headers, json=body) as response:
                 if response.status_code != 200:
                     response.read()
@@ -510,6 +527,20 @@ def chat_completion(
                         delta = event.get("delta")
                         if isinstance(delta, dict) and delta.get("type") == "text_delta":
                             chunks.append(str(delta.get("text", "")))
+                        if event.get("type") == "content_block_start":
+                            cb = event.get("content_block")
+                            if isinstance(cb, dict) and cb.get("type") == "tool_use":
+                                tool_calls.append(
+                                    {"name": cb.get("name", "?"), "arguments": ""}
+                                )
+                        if event.get("type") == "content_block_delta":
+                            delta = event.get("delta")
+                            if (
+                                isinstance(delta, dict)
+                                and delta.get("type") == "input_json_delta"
+                                and tool_calls
+                            ):
+                                tool_calls[-1]["arguments"] += str(delta.get("partial_json", ""))
                     else:
                         if event.get("model"):
                             model_echo = event.get("model")
@@ -518,8 +549,14 @@ def chat_completion(
                         choices = event.get("choices")
                         if isinstance(choices, list) and choices and isinstance(choices[0], dict):
                             delta = choices[0].get("delta")
-                            if isinstance(delta, dict) and delta.get("content"):
-                                chunks.append(str(delta["content"]))
+                            if isinstance(delta, dict):
+                                if delta.get("content"):
+                                    chunks.append(str(delta["content"]))
+                                tcs = delta.get("tool_calls")
+                                if isinstance(tcs, list):
+                                    for tc in tcs:
+                                        if isinstance(tc, dict):
+                                            tool_calls.append(tc)
                         if event.get("usage"):
                             u = event["usage"]
                             usage = {
@@ -538,6 +575,7 @@ def chat_completion(
                 "system_fingerprint": system_fingerprint,
                 "usage": usage,
                 "sse_events": sse_events,
+                "tool_calls": tool_calls,
             }
     except httpx.TimeoutException:
         return {"ok": False, "latency_ms": int((time.monotonic() - started) * 1000),

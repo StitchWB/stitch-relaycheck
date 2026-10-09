@@ -213,6 +213,17 @@ def _handle_get_balance(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _handle_scan_security(params: dict[str, Any]) -> dict[str, Any]:
+    """Security scan: canary, injection probes, IOC, TLS (HoloNe rules)."""
+    return service.scan_security(
+        ctx.db_path,
+        model=str(params.get("model", "") or ""),
+        target_id=str(params.get("targetId", params.get("target_id", "")) or ""),
+        base_url=str(params.get("baseUrl", params.get("base_url", ""))),
+        api_key=str(params.get("apiKey", params.get("api_key", ""))),
+    )
+
+
 def _handle_set_settings(params: dict[str, Any]) -> dict[str, Any]:
     """Merge a settings patch."""
     patch = params.get("settings", params.get("patch"))
@@ -247,6 +258,7 @@ def main() -> None:
     server.register("verify_model", _handle_verify_model)
     server.register("detect_watering", _handle_detect_watering)
     server.register("get_balance", _handle_get_balance)
+    server.register("scan_security", _handle_scan_security)
     server.register("refresh", _handle_refresh)
     server.register("get_settings", _handle_get_settings)
     server.register("set_settings", _handle_set_settings)

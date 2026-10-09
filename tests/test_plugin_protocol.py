@@ -234,3 +234,16 @@ def test_detect_watering_validates_params(plugin: PluginProc) -> None:
         )
     assert excinfo.value.error["code"] == -32603
     plugin.request("plugin.shutdown")
+
+
+def test_scan_security_validates_params(plugin: PluginProc) -> None:
+    """scan_security without any endpoint → JSON-RPC error."""
+    plugin.init()
+    plugin.request("plugin.ping")
+    with pytest.raises(RpcError) as excinfo:
+        plugin.request(
+            "plugin.call",
+            {"name": "scan_security", "params": {}},
+        )
+    assert excinfo.value.error["code"] == -32603
+    plugin.request("plugin.shutdown")
