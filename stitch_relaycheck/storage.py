@@ -15,6 +15,8 @@ plaintext key never touches this database.  ``key_mask`` is a display-safe
 mask (``sk-…abcd``).
 """
 
+# _generated_by: stitch_plugin_tools scaffold v3
+
 # _generated_by: stitch_plugin_tools scaffold v3 (schema authored by RelayCheck)
 
 from __future__ import annotations

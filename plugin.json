@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -15,14 +15,14 @@
   },
   "capabilities": [],
   "outputs": [],
-  "signature": "",
+  "signature": "ed25519:hfv+23+4pnrBWj5o9vWQd4iDTTwecnEkXotHRqBUDEM1pbj4syet1RoUbuyY2T9QcbNVp/FUuYxH0aa6utN9Dw==",
   "description": {
     "ru": "Локальный аудит AI-провайдеров и relay-станций: быстрый чек, fingerprint оригинальности модели, детект «водности» ответов, security-скан (canary, инъекции tool_use, правила HoloNe, IOC/TLS), производительность (latency/TTFT/TPS), баланс, полный аудит с trust score, сравнение целей. Ключи шифруются at-rest (Fernet) и не покидают машину.",
     "en": "Local auditor for AI providers and relay stations: quick check, model authenticity fingerprint, answer watering detection, security scan (canary, tool_use injection, HoloNe rules, IOC/TLS), performance (latency/TTFT/TPS), balance, full audit with trust score, target comparison. Keys are encrypted at rest (Fernet) and never leave the machine."
   },
   "author": "StitchWB",
   "category": "ai-tools",
-  "status": "beta",
+  "status": "stable",
   "icon": "🧪",
   "features": [
     {
@@ -90,6 +90,16 @@
     }
   ],
   "changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-09",
+      "changes": [
+        {
+          "ru": "Релиз: быстрый чек, цели с шифрованием ключей, история/отчёты, fingerprint оригинальности модели, watering-detector, security-скан (HoloNe-правила, canary, IOC/TLS), производительность, баланс, полный аудит с trust score, сравнение целей, holone deep scan. 163 теста, ruff clean, подпись ed25519.",
+          "en": "Release: quick check, targets with encrypted keys, history/reports, model authenticity fingerprint, watering detection, security scan (HoloNe rules, canary, IOC/TLS), performance, balance, full audit with trust score, target comparison, holone deep scan. 163 tests, ruff clean, ed25519 signature."
+        }
+      ]
+    },
     {
       "version": "0.6.0",
       "date": "2026-10-09",

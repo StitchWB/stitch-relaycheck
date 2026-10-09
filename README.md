@@ -91,11 +91,13 @@ lives in the private hub, never in this repo.
 
 ```bash
 # release flow (maintainer):
-python -m stitch_plugin_tools keygen --out keys/
+# NB: keep signing keys OUTSIDE the package dir — sign/publish walk the whole tree.
+python -m stitch_plugin_tools keygen --out ../stitch-relaycheck-keys/
 python -m stitch_plugin_tools upgrade . --apply   # refresh scaffold regions
-python -m stitch_plugin_tools sign . --key keys/private.key
+python -m stitch_plugin_tools sign . --key ../stitch-relaycheck-keys/private.key
+python -m stitch_plugin_tools verify . --pubkey ../stitch-relaycheck-keys/public.key
 python -m stitch_plugin_tools dev-install .       # smoke in STITCH_DEV_MODE=1
-python -m stitch_plugin_tools publish . --server-url <hub> --admin-key <key> --key keys/private.key
+python -m stitch_plugin_tools publish . --server-url <hub> --admin-key <key> --key ../stitch-relaycheck-keys/private.key
 ```
 
 ## Contributing

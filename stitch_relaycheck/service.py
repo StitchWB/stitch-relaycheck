@@ -13,6 +13,8 @@ Security contract:
   sanitized error strings — never keys.
 """
 
+# _generated_by: stitch_plugin_tools scaffold v3
+
 from __future__ import annotations
 
 import threading

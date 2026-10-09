@@ -24,3 +24,6 @@ venv/
 # Tooling caches
 .pytest_cache/
 .ruff_cache/
+
+# Signing keys (never commit)
+keys/
