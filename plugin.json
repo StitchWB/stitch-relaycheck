@@ -15,7 +15,7 @@
   },
   "capabilities": [],
   "outputs": [],
-  "signature": "ed25519:hfv+23+4pnrBWj5o9vWQd4iDTTwecnEkXotHRqBUDEM1pbj4syet1RoUbuyY2T9QcbNVp/FUuYxH0aa6utN9Dw==",
+  "signature": "",
   "description": {
     "ru": "Локальный аудит AI-провайдеров и relay-станций: быстрый чек, fingerprint оригинальности модели, детект «водности» ответов, security-скан (canary, инъекции tool_use, правила HoloNe, IOC/TLS), производительность (latency/TTFT/TPS), баланс, полный аудит с trust score, сравнение целей. Ключи шифруются at-rest (Fernet) и не покидают машину.",
     "en": "Local auditor for AI providers and relay stations: quick check, model authenticity fingerprint, answer watering detection, security scan (canary, tool_use injection, HoloNe rules, IOC/TLS), performance (latency/TTFT/TPS), balance, full audit with trust score, target comparison. Keys are encrypted at rest (Fernet) and never leave the machine."
