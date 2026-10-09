@@ -483,3 +483,53 @@ class TestScanSecurity:
         md = service.get_report_markdown(env, "latest")
         assert "security-скан" in md["text"]
         assert "clean" in md["text"]
+
+
+class TestHoloneDeepScan:
+    def test_requires_endpoint(self, env):
+        with pytest.raises(ValueError):
+            service.holone_deep_scan(env, model="m", base_url="", api_key="")
+
+    def test_report_written(self, env, monkeypatch):
+        monkeypatch.setattr(
+            "stitch_relaycheck.holone_bridge.run_holone_scan",
+            lambda *a, **k: {
+                "success": True,
+                "verdict": "critical",
+                "holone_verdict": "malicious",
+                "risk_score": 92,
+                "summary": "Обнаружено вредоносное поведение.",
+                "summary_en": "Malicious behavior detected.",
+                "recommendations": ["не используйте"],
+                "official": False,
+                "blocklist_hits": ["evil.example.com"],
+                "probes": [],
+                "tls": None,
+                "holone": {"host": "a.com"},
+                "binary": "/usr/bin/holone",
+            },
+        )
+        result = service.holone_deep_scan(
+            env, model="mock-gpt", base_url="https://a.com", api_key="sk-x"
+        )
+        assert result["success"] is True
+        assert result["verdict"] == "critical"
+        assert result["risk_score"] == 92
+        report = storage.get_report(env, result["report_id"])
+        assert report is not None
+        assert report["kind"] == "holone_scan"
+        assert report["score"] == 92
+        md = service.get_report_markdown(env, "latest")
+        assert "глубокий скан" in md["text"]
+        assert "evil.example.com" in md["text"]
+
+    def test_binary_missing_is_error_result(self, env, monkeypatch):
+        monkeypatch.setattr(
+            "stitch_relaycheck.holone_bridge.run_holone_scan",
+            lambda *a, **k: {"success": False, "error_text": "holone binary not found"},
+        )
+        out = service.holone_deep_scan(
+            env, model="m", base_url="https://a.com", api_key="sk-x"
+        )
+        assert out["success"] is False
+        assert "holone" in out["error_text"]

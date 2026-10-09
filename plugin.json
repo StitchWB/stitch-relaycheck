@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -80,9 +80,26 @@
         "en": "Full audit (background jobs), trust score, performance, target comparison"
       },
       "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "Глубокий security-скан через внешний holone (скачивание по sha256, --json парсинг)",
+        "en": "Deep security scan via external holone (sha256-verified download, --json parsing)"
+      },
+      "status": "beta"
     }
   ],
   "changelog": [
+    {
+      "version": "0.6.0",
+      "date": "2026-10-09",
+      "changes": [
+        {
+          "ru": "holone-мост: команда holone_deep_scan — внешний `holone scan --json` (поиск в PATH, скачивание release по SHA256SUMS), маппинг вердиктов, отчёты; UI-кнопки",
+          "en": "Holone bridge: holone_deep_scan command — external `holone scan --json` (PATH lookup, release download verified via SHA256SUMS), verdict mapping, reports; UI buttons"
+        }
+      ]
+    },
     {
       "version": "0.5.0",
       "date": "2026-10-09",
@@ -227,6 +244,10 @@
       {
         "name": "compare_targets",
         "readonly": true
+      },
+      {
+        "name": "holone_deep_scan",
+        "readonly": false
       }
     ],
     "ui": {
@@ -356,6 +377,23 @@
                   "model": "qc-model"
                 },
                 "variant": "secondary"
+              },
+              {
+                "kind": "button",
+                "id": "qc-holone-btn",
+                "label": "stitch-relaycheck.quick.holone",
+                "command": "holone_deep_scan",
+                "params": {
+                  "baseUrl": "",
+                  "apiKey": "",
+                  "model": ""
+                },
+                "paramsFrom": {
+                  "baseUrl": "qc-url",
+                  "apiKey": "qc-key",
+                  "model": "qc-model"
+                },
+                "variant": "ghost"
               }
             ]
           },
@@ -472,6 +510,18 @@
                     "variant": "danger",
                     "paramsFromRow": {
                       "id": "id"
+                    }
+                  },
+                  {
+                    "id": "holone-target-row",
+                    "label": "stitch-relaycheck.targets.holone",
+                    "command": "holone_deep_scan",
+                    "params": {
+                      "model": ""
+                    },
+                    "paramsFromRow": {
+                      "targetId": "id",
+                      "model": "model"
                     }
                   }
                 ]
@@ -709,7 +759,8 @@
             "fingerprint": "Fingerprint модели",
             "water": "Водность ответов",
             "scan": "Скан безопасности",
-            "audit": "Полный аудит"
+            "audit": "Полный аудит",
+            "holone": "Holone deep scan"
           },
           "targets": {
             "title": "Мои цели (relay)",
@@ -728,7 +779,8 @@
             "balance": "Баланс",
             "delete": "Удалить",
             "scan": "Скан",
-            "audit": "Аудит"
+            "audit": "Аудит",
+            "holone": "Holone"
           },
           "addTarget": {
             "title": "Добавить цель",
@@ -791,7 +843,8 @@
             "fingerprint": "Fingerprint model",
             "water": "Watering check",
             "scan": "Security scan",
-            "audit": "Full audit"
+            "audit": "Full audit",
+            "holone": "Holone deep scan"
           },
           "targets": {
             "title": "My targets (relays)",
@@ -810,7 +863,8 @@
             "balance": "Balance",
             "delete": "Delete",
             "scan": "Scan",
-            "audit": "Audit"
+            "audit": "Audit",
+            "holone": "Holone"
           },
           "addTarget": {
             "title": "Add target",

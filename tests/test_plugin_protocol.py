@@ -260,3 +260,16 @@ def test_start_audit_job_validates_params(plugin: PluginProc) -> None:
         )
     assert excinfo.value.error["code"] == -32603
     plugin.request("plugin.shutdown")
+
+
+def test_holone_deep_scan_validates_params(plugin: PluginProc) -> None:
+    """holone_deep_scan without any endpoint → JSON-RPC error."""
+    plugin.init()
+    plugin.request("plugin.ping")
+    with pytest.raises(RpcError) as excinfo:
+        plugin.request(
+            "plugin.call",
+            {"name": "holone_deep_scan", "params": {}},
+        )
+    assert excinfo.value.error["code"] == -32603
+    plugin.request("plugin.shutdown")

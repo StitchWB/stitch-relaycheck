@@ -242,6 +242,17 @@ def _handle_compare_targets(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _handle_holone_deep_scan(params: dict[str, Any]) -> dict[str, Any]:
+    """Deep security scan via the external holone binary (optional)."""
+    return service.holone_deep_scan(
+        ctx.db_path,
+        model=str(params.get("model", "") or ""),
+        target_id=str(params.get("targetId", params.get("target_id", "")) or ""),
+        base_url=str(params.get("baseUrl", params.get("base_url", ""))),
+        api_key=str(params.get("apiKey", params.get("api_key", ""))),
+    )
+
+
 def _handle_get_settings(params: dict[str, Any]) -> dict[str, Any]:
     """Return effective plugin settings."""
     return {"success": True, "settings": service.get_settings(ctx.db_path)}
@@ -329,6 +340,7 @@ def main() -> None:
     server.register("get_job", _handle_get_job)
     server.register("list_jobs", _handle_list_jobs)
     server.register("compare_targets", _handle_compare_targets)
+    server.register("holone_deep_scan", _handle_holone_deep_scan)
     server.register("refresh", _handle_refresh)
     server.register("get_settings", _handle_get_settings)
     server.register("set_settings", _handle_set_settings)

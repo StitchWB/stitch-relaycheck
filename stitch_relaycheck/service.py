@@ -17,9 +17,20 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
-from . import client, crypto, fingerprint, performance, scoring, security, storage, watering
+from . import (
+    client,
+    crypto,
+    fingerprint,
+    holone_bridge,
+    performance,
+    scoring,
+    security,
+    storage,
+    watering,
+)
 
 #: Default plugin settings (overridable via ``set_settings``).
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -262,6 +273,8 @@ def get_report_markdown(db_path: str, report_id: str = "latest") -> dict[str, An
         return {"text": _render_fingerprint_markdown(report)}
     if report["kind"] == "security":
         return {"text": _render_security_markdown(report)}
+    if report["kind"] == "holone_scan":
+        return {"text": _render_holone_markdown(report)}
     summary = report.get("summary", {})
 
     lines = [
@@ -444,6 +457,45 @@ def _render_security_markdown(report: dict[str, Any]) -> str:
         "",
         "> Скан — эвристика, не гарантия: чистый результат не доказывает честность провайдера "
         "(пассивный слив промптов не детектится). Самый безопасный вариант — официальный endpoint.",
+    ]
+    return "\n".join(lines)
+
+
+def _render_holone_markdown(report: dict[str, Any]) -> str:
+    """Render an external holone deep-scan report."""
+    s = report.get("summary", {})
+    verdict = report.get("verdict") or "—"
+    label = _SECURITY_LABELS_RU.get(verdict, verdict)
+    lines = [
+        "# RelayCheck: глубокий скан (внешний holone)",
+        "",
+        f"- **Дата:** {report['created_at']}",
+        f"- **Цель:** {report['target']}",
+        f"- **Модель:** `{s.get('model', '—')}`",
+        f"- **Вердикт holone:** `{s.get('holone_verdict') or '—'}` → {label}",
+        f"- **Risk score:** {report['score'] if report['score'] is not None else '—'} / 100",
+        f"- **Официальный endpoint:** {'да' if s.get('official') else 'нет'}",
+        f"- **Бинарь:** `{s.get('binary') or '—'}`",
+    ]
+    if s.get("summary"):
+        lines += ["", str(s["summary"])]
+    hits = s.get("blocklist_hits") or []
+    if hits:
+        lines += ["", "## Blocklist hits", ""] + [f"- `{h}`" for h in hits]
+    recs = s.get("recommendations") or []
+    if recs:
+        lines += ["", "## Рекомендации holone", ""] + [f"- {r}" for r in recs[:10]]
+    probes = s.get("probes") or []
+    if probes:
+        lines += ["", "## Probes", ""]
+        for p in probes[:10]:
+            lines.append(f"- `{p.get('name', '?')}`: {p.get('status', '?')}" +
+                         (f" — findings: {p.get('findings')}" if p.get("findings") else ""))
+    lines += [
+        "",
+        "> Внешний скан — тот же класс эвристики: чистый результат не доказывает честность. "
+        "Для постоянной защиты направьте клиент через `holone proxy` (127.0.0.1:8787) "
+        "или используйте встроенный HoloNe в Stitch AI Hub.",
     ]
     return "\n".join(lines)
 
@@ -1099,3 +1151,72 @@ def compare_targets(
             "trust": _trust_for_target(db_path, tid),
         }
     return {"success": True, **out}
+
+
+# ── External holone deep scan (Этап 6) ──────────────────────────────────────
+
+
+def holone_deep_scan(
+    db_path: str,
+    *,
+    model: str = "",
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+) -> dict[str, Any]:
+    """Deep security scan via the external ``holone`` binary (vanndh/holone).
+
+    Optional: uses the bundled engine by default; this command runs the real
+    ``holone scan`` (finds the binary in PATH or downloads it with sha256
+    verification).  Note: the key is passed as a CLI argument to holone.
+    """
+    base_url, api_key, target_name, err = _resolve_endpoint(
+        db_path, target_id=target_id, base_url=base_url, api_key=api_key
+    )
+    if err is not None:
+        return err
+    if not model.strip() and target_id:
+        target = storage.get_target(db_path, target_id)
+        if target and target.get("model"):
+            model = str(target["model"]).strip()
+
+    base_url = client.normalize_base_url(base_url)
+    timeout = _timeout(db_path)
+    if not model.strip():
+        proto = client.detect_protocol(base_url, api_key, timeout)
+        models = proto.get("models") or []
+        if models:
+            model = str(models[0]["id"]).strip()
+        else:
+            raise ValueError("model is required (endpoint advertises no models)")
+    model = model.strip()
+
+    data_dir = str(Path(db_path).parent) if db_path else ""
+    result = holone_bridge.run_holone_scan(
+        base_url, api_key, model, data_dir=data_dir, timeout=max(60.0, timeout * 4)
+    )
+    if not result.get("success"):
+        return result
+    report = storage.add_report(
+        db_path,
+        kind="holone_scan",
+        target_id=target_id or None,
+        target_name=target_name,
+        base_url=base_url,
+        verdict=result["verdict"],
+        score=result.get("risk_score"),
+        summary={
+            "model": model,
+            "holone_verdict": result.get("holone_verdict"),
+            "summary": result.get("summary"),
+            "summary_en": result.get("summary_en"),
+            "recommendations": result.get("recommendations"),
+            "official": result.get("official"),
+            "blocklist_hits": result.get("blocklist_hits"),
+            "probes": result.get("probes"),
+            "tls": result.get("tls"),
+            "holone": result.get("holone"),
+            "binary": result.get("binary"),
+        },
+    )
+    return {**result, "report_id": report["id"]}
