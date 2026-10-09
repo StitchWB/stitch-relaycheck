@@ -183,6 +183,36 @@ def _handle_get_settings(params: dict[str, Any]) -> dict[str, Any]:
     return {"success": True, "settings": service.get_settings(ctx.db_path)}
 
 
+def _handle_detect_watering(params: dict[str, Any]) -> dict[str, Any]:
+    """Watering check: diluted/rewritten answers (optional reference compare)."""
+    return service.detect_watering(
+        ctx.db_path,
+        model=str(params.get("model", "") or ""),
+        target_id=str(params.get("targetId", params.get("target_id", "")) or ""),
+        base_url=str(params.get("baseUrl", params.get("base_url", ""))),
+        api_key=str(params.get("apiKey", params.get("api_key", ""))),
+        reference_base_url=str(
+            params.get("referenceBaseUrl", params.get("reference_base_url", "")) or ""
+        ),
+        reference_api_key=str(
+            params.get("referenceApiKey", params.get("reference_api_key", "")) or ""
+        ),
+        reference_model=str(
+            params.get("referenceModel", params.get("reference_model", "")) or ""
+        ),
+    )
+
+
+def _handle_get_balance(params: dict[str, Any]) -> dict[str, Any]:
+    """Read-only balance/quota lookup against the relay dashboard."""
+    return service.get_balance(
+        ctx.db_path,
+        target_id=str(params.get("targetId", params.get("target_id", "")) or ""),
+        base_url=str(params.get("baseUrl", params.get("base_url", ""))),
+        api_key=str(params.get("apiKey", params.get("api_key", ""))),
+    )
+
+
 def _handle_set_settings(params: dict[str, Any]) -> dict[str, Any]:
     """Merge a settings patch."""
     patch = params.get("settings", params.get("patch"))
@@ -215,6 +245,8 @@ def main() -> None:
     server.register("get_report", _handle_get_report)
     server.register("get_report_markdown", _handle_get_report_markdown)
     server.register("verify_model", _handle_verify_model)
+    server.register("detect_watering", _handle_detect_watering)
+    server.register("get_balance", _handle_get_balance)
     server.register("refresh", _handle_refresh)
     server.register("get_settings", _handle_get_settings)
     server.register("set_settings", _handle_set_settings)

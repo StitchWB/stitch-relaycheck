@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -17,8 +17,8 @@
   "outputs": [],
   "signature": "",
   "description": {
-    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, определение протокола, латентность, fingerprint оригинальности модели (настоящая ли модель за relay), история проверок и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn. Далее — watering-detector и security-скан по правилам HoloNe.",
-    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, protocol detection, latency, model authenticity fingerprint (is the claimed model really behind the relay), check history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available. Next: watering detection and HoloNe-rule security scan."
+    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, fingerprint оригинальности модели, детект «водности» ответов, баланс панелей, история и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn. Далее — security-скан по правилам HoloNe.",
+    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, model authenticity fingerprint, answer watering detection, balance lookup, history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available. Next: HoloNe-rule security scan."
   },
   "author": "StitchWB",
   "category": "ai-tools",
@@ -52,9 +52,33 @@
         "en": "Model authenticity fingerprint (tokenizer deltas, capability, consistency)"
       },
       "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "Детект «водности» ответов (watering), опционально со сравнением с reference",
+        "en": "Answer watering detection, optionally compared against a reference endpoint"
+      },
+      "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "Запрос баланса/квоты панели (one-api/new-api, LiteLLM), read-only",
+        "en": "Read-only balance/quota lookup (one-api/new-api, LiteLLM)"
+      },
+      "status": "beta"
     }
   ],
   "changelog": [
+    {
+      "version": "0.3.0",
+      "date": "2026-10-09",
+      "changes": [
+        {
+          "ru": "Watering-detector (detect_watering): эвристики + сравнение с reference; парсер баланса (get_balance) для one-api/new-api/LiteLLM; UI-кнопки «Вода» и «Баланс» у целей",
+          "en": "Watering detector (detect_watering): heuristics + reference comparison; balance parser (get_balance) for one-api/new-api/LiteLLM; 'Water' and 'Balance' row actions in UI"
+        }
+      ]
+    },
     {
       "version": "0.2.0",
       "date": "2026-10-09",
@@ -104,6 +128,14 @@
       },
       {
         "name": "verify_model",
+        "readonly": false
+      },
+      {
+        "name": "detect_watering",
+        "readonly": false
+      },
+      {
+        "name": "get_balance",
         "readonly": false
       },
       {
@@ -211,6 +243,23 @@
                   "model": "qc-model"
                 },
                 "variant": "secondary"
+              },
+              {
+                "kind": "button",
+                "id": "qc-water-btn",
+                "label": "stitch-relaycheck.quick.water",
+                "command": "detect_watering",
+                "params": {
+                  "baseUrl": "",
+                  "apiKey": "",
+                  "model": ""
+                },
+                "paramsFrom": {
+                  "baseUrl": "qc-url",
+                  "apiKey": "qc-key",
+                  "model": "qc-model"
+                },
+                "variant": "secondary"
               }
             ]
           },
@@ -273,6 +322,26 @@
                     "paramsFromRow": {
                       "targetId": "id",
                       "model": "model"
+                    }
+                  },
+                  {
+                    "id": "water-target-row",
+                    "label": "stitch-relaycheck.targets.water",
+                    "command": "detect_watering",
+                    "params": {
+                      "model": ""
+                    },
+                    "paramsFromRow": {
+                      "targetId": "id",
+                      "model": "model"
+                    }
+                  },
+                  {
+                    "id": "balance-target-row",
+                    "label": "stitch-relaycheck.targets.balance",
+                    "command": "get_balance",
+                    "paramsFromRow": {
+                      "targetId": "id"
                     }
                   },
                   {
@@ -475,7 +544,8 @@
             "model": "Модель",
             "modelPlaceholder": "например, claude-opus-4-8",
             "check": "Проверить",
-            "fingerprint": "Fingerprint модели"
+            "fingerprint": "Fingerprint модели",
+            "water": "Водность ответов"
           },
           "targets": {
             "title": "Мои цели (relay)",
@@ -490,6 +560,8 @@
             },
             "check": "Чек",
             "fingerprint": "Fingerprint",
+            "water": "Вода",
+            "balance": "Баланс",
             "delete": "Удалить"
           },
           "addTarget": {
@@ -540,7 +612,8 @@
             "model": "Model",
             "modelPlaceholder": "e.g. claude-opus-4-8",
             "check": "Check",
-            "fingerprint": "Fingerprint model"
+            "fingerprint": "Fingerprint model",
+            "water": "Watering check"
           },
           "targets": {
             "title": "My targets (relays)",
@@ -555,6 +628,8 @@
             },
             "check": "Check",
             "fingerprint": "Fingerprint",
+            "water": "Water",
+            "balance": "Balance",
             "delete": "Delete"
           },
           "addTarget": {

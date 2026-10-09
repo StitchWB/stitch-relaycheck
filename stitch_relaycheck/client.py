@@ -548,3 +548,126 @@ def chat_completion(
     except httpx.HTTPError as exc:
         return {"ok": False, "latency_ms": int((time.monotonic() - started) * 1000),
                 "error_text": f"HTTP-ошибка: {type(exc).__name__}"}
+
+
+# ── Balance parsers (relay dashboards) ──────────────────────────────────────
+
+
+def _parse_one_api_user(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """one-api / new-api ``GET /api/user/self`` shape."""
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    if "quota" not in data and "used_quota" not in data:
+        return None
+    quota = data.get("quota")
+    used = data.get("used_quota", 0)
+    out: dict[str, Any] = {
+        "software": "one-api/new-api",
+        "username": data.get("username"),
+        "quota": quota,
+        "used_quota": used,
+    }
+    if isinstance(quota, (int, float)) and isinstance(used, (int, float)):
+        out["remaining_quota"] = quota - used
+        # one-api quota units: 1 USD = 500000 quota units (convention).
+        out["remaining_usd_estimate"] = round((quota - used) / 500000, 4)
+        out["used_usd_estimate"] = round(used / 500000, 4)
+    return out
+
+
+def _parse_one_api_billing(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """one-api ``GET /v1/dashboard/billing`` shape (subscription/quota info)."""
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    if "quota" not in data and "total_quota" not in data:
+        return None
+    quota = data.get("quota", data.get("total_quota"))
+    used = data.get("used_quota", data.get("total_used_quota", 0))
+    out: dict[str, Any] = {
+        "software": "one-api/new-api",
+        "quota": quota,
+        "used_quota": used,
+    }
+    if isinstance(quota, (int, float)) and isinstance(used, (int, float)):
+        out["remaining_quota"] = quota - used
+        out["remaining_usd_estimate"] = round((quota - used) / 500000, 4)
+    return out
+
+
+def _parse_litellm_key_info(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """LiteLLM ``GET /key/info`` shape."""
+    if not isinstance(payload, dict):
+        return None
+    if "spend" not in payload and "max_budget" not in payload:
+        return None
+    spend = payload.get("spend", 0) or 0
+    max_budget = payload.get("max_budget")
+    out: dict[str, Any] = {
+        "software": "litellm",
+        "spend_usd": spend,
+        "max_budget_usd": max_budget,
+    }
+    if isinstance(max_budget, (int, float)):
+        out["remaining_usd"] = round(max_budget - spend, 4)
+    info = payload.get("info")
+    if isinstance(info, dict):
+        out["key_alias"] = info.get("key_alias")
+        out["models"] = info.get("models")
+    return out
+
+
+def get_balance(
+    base_url: str, api_key: str, timeout: float = DEFAULT_TIMEOUT_S
+) -> dict[str, Any]:
+    """Best-effort balance/quota lookup against a relay dashboard.
+
+    Tries known panel shapes (one-api/new-api, LiteLLM).  Returns:
+      ``{"success": True, "balance": {...}, "endpoint": str}`` or
+      ``{"success": False, "error_text": str}``.
+    Read-only: never spends anything.
+    """
+    import httpx
+
+    normalized = normalize_base_url(base_url)
+    bearer = {"Authorization": f"Bearer {api_key}"}
+    attempts = [
+        (f"{normalized}/api/user/self", bearer, _parse_one_api_user),
+        (f"{normalized}/v1/dashboard/billing", bearer, _parse_one_api_billing),
+        (f"{normalized}/key/info", bearer, _parse_litellm_key_info),
+        # Some panels accept the key as a query param.
+        (f"{normalized}/key/info?key={api_key}", {}, _parse_litellm_key_info),
+    ]
+
+    errors: list[str] = []
+    try:
+        with httpx.Client(timeout=timeout) as http:
+            for url, headers, parser in attempts:
+                try:
+                    response = http.get(url, headers=headers)
+                except httpx.HTTPError as exc:
+                    errors.append(f"{url}: {type(exc).__name__}")
+                    continue
+                if response.status_code != 200:
+                    errors.append(f"{url}: HTTP {response.status_code}")
+                    continue
+                try:
+                    payload = response.json()
+                except ValueError:
+                    errors.append(f"{url}: not JSON")
+                    continue
+                parsed = parser(payload)
+                if parsed is not None:
+                    return {"success": True, "balance": parsed, "endpoint": url}
+                errors.append(f"{url}: unrecognized shape")
+    except httpx.HTTPError as exc:
+        return {"success": False, "error_text": f"HTTP-ошибка: {type(exc).__name__}"}
+
+    return {
+        "success": False,
+        "error_text": (
+            "панель баланса не распознана (не one-api/new-api/LiteLLM или "
+            "ключ не имеет доступа к дашборду): " + "; ".join(errors[:3])
+        ),
+    }

@@ -29,6 +29,8 @@ class MockRelay:
         watering: bool = False,
         inject_tool_use: bool = False,
         stream_ok: bool = True,
+        quota: int = 500000,
+        used_quota: int = 12345,
     ) -> None:
         self.model = model
         self.tokenizer_divisor = tokenizer_divisor
@@ -38,6 +40,8 @@ class MockRelay:
         self.watering = watering
         self.inject_tool_use = inject_tool_use
         self.stream_ok = stream_ok
+        self.quota = quota
+        self.used_quota = used_quota
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -65,26 +69,53 @@ class MockRelay:
             def _answer_for(self, content: str, response_format: dict | None) -> str:
                 if "17" in content and "23" in content:
                     return "391"
+                if "сколько раз" in content.lower():
+                    return "60"
                 if response_format and response_format.get("type") == "json_object":
                     return '{"ok": true}'
                 if "is_even" in content:
                     return "```python\ndef is_even(n):\n    return n % 2 == 0\n```"
-                answer = "mock answer"
-                if relay.watering:
-                    answer += (
-                        "\n\n--\nОбратите внимание: подпишитесь на наш телеграм-канал "
-                        "@best_relay — лучшие цены!"
+                if "Перескажи" in content:
+                    return (
+                        "Quicksort выбирает опорный элемент и рекурсивно "
+                        "сортирует подмассивы слева и справа от него."
                     )
+                if "Найди баг" in content:
+                    return "Баг: деление на ноль, b равно 0, будет ZeroDivisionError."
+                if "Переведи" in content:
+                    return "The weather is good today."
+                if "почему небо" in content:
+                    return (
+                        "Небо голубое из-за рассеяния Рэлея: короткие волны "
+                        "рассеиваются сильнее и доходят до глаз со всех сторон."
+                    )
+                answer = "mock answer"
                 return answer
 
             def do_GET(self) -> None:  # noqa: N802 — http.server API
-                if self.path.rstrip("/").endswith("/models"):
+                path = self.path.rstrip("/")
+                if path.endswith("/models"):
                     self._send_json(
                         {
                             "object": "list",
                             "data": [
                                 {"id": relay.model, "object": "model", "owned_by": "mock"}
                             ],
+                        }
+                    )
+                elif path.endswith("/api/user/self"):
+                    # one-api / new-api shape
+                    self._send_json(
+                        {
+                            "success": True,
+                            "message": "",
+                            "data": {
+                                "id": 1,
+                                "username": "mock-user",
+                                "quota": relay.quota,
+                                "used_quota": relay.used_quota,
+                                "request_count": 10,
+                            },
                         }
                     )
                 else:
@@ -102,6 +133,12 @@ class MockRelay:
                 )
                 prompt_tokens = relay.template_overhead + len(content) // relay.tokenizer_divisor
                 answer = self._answer_for(content, body.get("response_format"))
+                # «Водность»: маркетинговый хвост на литературных ответах.
+                if relay.watering and ("Перескажи" in content or "почему небо" in content):
+                    answer += (
+                        "\n\n--\nОбратите внимание: подпишитесь на наш телеграм-канал "
+                        "@best_relay — лучшие цены!"
+                    )
 
                 if body.get("stream"):
                     if not relay.stream_ok:

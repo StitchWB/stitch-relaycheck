@@ -310,3 +310,106 @@ class TestVerifyModel:
         assert "fingerprint" in md["text"]
         assert "authentic" in md["text"]
         assert "Tokenizer deltas" in md["text"]
+
+
+def _fake_watering_result(verdict="watered", score=55):
+    return {
+        "model": "mock-gpt",
+        "score": score,
+        "verdict": verdict,
+        "reasons": ["[marketing_tail] в ответе найдена маркетинговая вставка"],
+        "prompts": [
+            {
+                "id": "reasoning",
+                "ok": True,
+                "relay_text": "ответ… хвост про канал",
+                "latency_ms": 100,
+                "heuristics": [{"id": "marketing_tail", "severity": "high", "detail": "x"}],
+            }
+        ],
+        "duration_ms": 1500,
+        "probe_count": 5,
+        "compared_with_reference": False,
+    }
+
+
+class TestWatering:
+    def test_model_required(self, env):
+        with pytest.raises(ValueError):
+            service.detect_watering(env, model="")
+
+    def test_adhoc_requires_url_and_key(self, env):
+        with pytest.raises(ValueError):
+            service.detect_watering(env, model="m", base_url="", api_key="")
+
+    def test_report_written(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client, "detect_protocol", lambda *a, **k: {"success": True, "protocol": "openai"}
+        )
+        monkeypatch.setattr(
+            "stitch_relaycheck.watering.run_watering",
+            lambda *a, **k: _fake_watering_result(),
+        )
+        result = service.detect_watering(
+            env, model="mock-gpt", base_url="https://a.com", api_key="sk-x"
+        )
+        assert result["success"] is True
+        assert result["verdict"] == "watered"
+        assert result["score"] == 55
+        report = storage.get_report(env, result["report_id"])
+        assert report is not None
+        assert report["kind"] == "watering"
+        assert report["verdict"] == "watered"
+        assert report["score"] == 55
+
+    def test_reference_forwarded(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client, "detect_protocol", lambda *a, **k: {"success": True, "protocol": "openai"}
+        )
+        captured = {}
+
+        def fake_run(base_url, api_key, model, protocol, timeout, reference=None):
+            captured["reference"] = reference
+            return _fake_watering_result(verdict="clean", score=0)
+
+        monkeypatch.setattr("stitch_relaycheck.watering.run_watering", fake_run)
+        result = service.detect_watering(
+            env,
+            model="m",
+            base_url="https://relay.example.com",
+            api_key="sk-x",
+            reference_base_url="https://official.example.com/v1/",
+            reference_api_key="sk-ref",
+            reference_model="m-ref",
+        )
+        assert result["success"] is True
+        assert captured["reference"]["base_url"] == "https://official.example.com"
+        assert captured["reference"]["model"] == "m-ref"
+
+
+class TestBalance:
+    def test_adhoc_requires_url_and_key(self, env):
+        with pytest.raises(ValueError):
+            service.get_balance(env, target_id="", base_url="", api_key="")
+
+    def test_report_written(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client,
+            "get_balance",
+            lambda *a, **k: {
+                "success": True,
+                "balance": {"software": "one-api/new-api", "remaining_usd_estimate": 0.97},
+                "endpoint": "https://a.com/api/user/self",
+            },
+        )
+        result = service.get_balance(env, base_url="https://a.com", api_key="sk-x")
+        assert result["success"] is True
+        assert result["balance"]["remaining_usd_estimate"] == 0.97
+        report = storage.get_report(env, result["report_id"])
+        assert report is not None
+        assert report["kind"] == "balance"
+        assert report["verdict"] == "ok"
+
+    def test_target_resolution_error(self, env):
+        out = service.get_balance(env, target_id="nope")
+        assert out["success"] is False

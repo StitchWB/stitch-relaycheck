@@ -21,16 +21,17 @@ behind that endpoint.
 | 1 | Quick endpoint check: connectivity, protocol detect, model list, latency | ✅ v0.1.0 |
 | 2 | Saved targets with encrypted keys + check history + markdown reports | ✅ v0.1.0 |
 | 3 | Model authenticity fingerprint (tokenizer/capability/metadata probes, verdict + score) | ✅ v0.2.0 |
-| 4 | Watering detection (relay vs reference answer comparison) | 🚧 |
-| 5 | Security scan: canary probes, unsolicited `tool_use`, HoloNe-rule engine, IOC/TLS | 🚧 |
-| 6 | Performance series (TTFT/TPS/uptime), token-accounting, balance parsers | 🚧 |
-| 7 | Full audit jobs, trust score, target comparison, external `holone scan` deep mode | 🚧 |
+| 4 | Watering detection (heuristics + optional reference-endpoint comparison) | ✅ v0.3.0 |
+| 5 | Balance/quota lookup (one-api/new-api, LiteLLM) — read-only | ✅ v0.3.0 |
+| 6 | Security scan: canary probes, unsolicited `tool_use`, HoloNe-rule engine, IOC/TLS | 🚧 |
+| 7 | Performance series (TTFT/TPS/uptime), token-accounting | 🚧 |
+| 8 | Full audit jobs, trust score, target comparison, external `holone scan` deep mode | 🚧 |
 
 ## Commands
 
 `health_check`, `check_endpoint`, `save_target`, `list_targets`, `check_target`,
-`verify_model`, `delete_target`, `list_reports`, `get_report`, `get_report_markdown`,
-`refresh`, `get_settings`, `set_settings`.
+`verify_model`, `detect_watering`, `get_balance`, `delete_target`, `list_reports`,
+`get_report`, `get_report_markdown`, `refresh`, `get_settings`, `set_settings`.
 
 ## Layout
 
@@ -40,8 +41,9 @@ data/fingerprints.json      model fingerprint profile DB (tokenizer deltas, capa
 stitch_relaycheck/
   __main__.py               JSON-RPC entry point (RpcPluginServer)
   service.py                command logic (thin orchestration, security contract)
-  client.py                 HTTP layer: protocol detect, model list, chat completions
+  client.py                 HTTP layer: protocol detect, model list, chat completions, balance parsers
   fingerprint.py            model authenticity probes + verdict aggregation
+  watering.py               answer-dilution heuristics + reference comparison
   storage.py                SQLite (targets, reports, settings)
   crypto.py                 Fernet at-rest encryption (same scheme as core / stitch-totp)
   _vendor/rpc_server.py     vendored RpcPluginServer (regenerated; do not edit)

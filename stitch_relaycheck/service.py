@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import client, crypto, fingerprint, storage
+from . import client, crypto, fingerprint, storage, watering
 
 #: Default plugin settings (overridable via ``set_settings``).
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -457,3 +457,144 @@ def verify_model(
         "duration_ms": fp["duration_ms"],
         "report_id": report["id"],
     }
+
+
+# ── Watering + balance (Этап 3) ─────────────────────────────────────────────
+
+
+def _resolve_endpoint(
+    db_path: str,
+    *,
+    target_id: str,
+    base_url: str,
+    api_key: str,
+) -> tuple[str, str, str, dict[str, Any] | None]:
+    """Resolve (base_url, api_key, target_name) from a saved target or ad-hoc.
+
+    Returns ``(..., None)`` on success or ``("", "", "", error_result)``.
+    """
+    target_name = "ad-hoc"
+    if target_id:
+        target = storage.get_target(db_path, target_id)
+        if target is None:
+            return "", "", "", {
+                "success": False,
+                "error_text": f"target {target_id!r} not found",
+            }
+        if not target.get("api_key_enc"):
+            return "", "", "", {
+                "success": False,
+                "error_text": "у цели нет сохранённого ключа (persistKey был выключен)",
+            }
+        return (
+            str(target["base_url"]),
+            crypto.decrypt(str(target["api_key_enc"])),
+            str(target["name"]),
+            None,
+        )
+    if not base_url.strip() or not api_key.strip():
+        raise ValueError("baseUrl and apiKey are required (or pass targetId)")
+    return base_url.strip(), api_key.strip(), target_name, None
+
+
+def detect_watering(
+    db_path: str,
+    *,
+    model: str = "",
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    reference_base_url: str = "",
+    reference_api_key: str = "",
+    reference_model: str = "",
+) -> dict[str, Any]:
+    """Watering check: are the relay's answers diluted/rewritten?
+
+    Optional ``reference_*`` params enable answer-vs-answer comparison.
+    """
+    base_url, api_key, target_name, err = _resolve_endpoint(
+        db_path, target_id=target_id, base_url=base_url, api_key=api_key
+    )
+    if err is not None:
+        return err
+    if not model.strip() and target_id:
+        target = storage.get_target(db_path, target_id)
+        if target and target.get("model"):
+            model = str(target["model"]).strip()
+    if not model.strip():
+        raise ValueError("model is required for watering check")
+    model = model.strip()
+
+    base_url = client.normalize_base_url(base_url)
+    timeout = _timeout(db_path)
+    proto = client.detect_protocol(base_url, api_key, timeout)
+    protocol = proto.get("protocol") or "openai"
+
+    reference = None
+    if reference_base_url.strip() and reference_api_key.strip():
+        reference = {
+            "base_url": client.normalize_base_url(reference_base_url),
+            "api_key": reference_api_key.strip(),
+            "model": reference_model.strip(),
+        }
+
+    result = watering.run_watering(
+        base_url, api_key, model, protocol, timeout, reference
+    )
+    report = storage.add_report(
+        db_path,
+        kind="watering",
+        target_id=target_id or None,
+        target_name=target_name,
+        base_url=base_url,
+        verdict=result["verdict"],
+        score=result["score"],
+        latency_ms=result["duration_ms"],
+        summary={
+            "model": model,
+            "protocol": protocol,
+            "reasons": result["reasons"],
+            "compared_with_reference": result["compared_with_reference"],
+            "probe_count": result["probe_count"],
+            "prompts": result["prompts"],
+        },
+    )
+    return {
+        "success": True,
+        "score": result["score"],
+        "verdict": result["verdict"],
+        "reasons": result["reasons"],
+        "model": model,
+        "compared_with_reference": result["compared_with_reference"],
+        "prompts": result["prompts"],
+        "probe_count": result["probe_count"],
+        "duration_ms": result["duration_ms"],
+        "report_id": report["id"],
+    }
+
+
+def get_balance(
+    db_path: str,
+    *,
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+) -> dict[str, Any]:
+    """Read-only balance/quota lookup against the relay dashboard."""
+    base_url, api_key, target_name, err = _resolve_endpoint(
+        db_path, target_id=target_id, base_url=base_url, api_key=api_key
+    )
+    if err is not None:
+        return err
+    base_url = client.normalize_base_url(base_url)
+    result = client.get_balance(base_url, api_key, _timeout(db_path))
+    report = storage.add_report(
+        db_path,
+        kind="balance",
+        target_id=target_id or None,
+        target_name=target_name,
+        base_url=base_url,
+        verdict="ok" if result.get("success") else "error",
+        summary={"balance": result.get("balance"), "error_text": result.get("error_text")},
+    )
+    return {**result, "report_id": report["id"]}
