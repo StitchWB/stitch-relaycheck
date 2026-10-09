@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import client, crypto, storage
+from . import client, crypto, fingerprint, storage
 
 #: Default plugin settings (overridable via ``set_settings``).
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -142,6 +142,7 @@ def save_target(
     base_url: str,
     api_key: str,
     note: str = "",
+    model: str = "",
     persist_key: bool = True,
 ) -> dict[str, Any]:
     """Save a relay target.  The key is Fernet-encrypted before storage.
@@ -170,6 +171,7 @@ def save_target(
         api_key_enc=api_key_enc,
         key_mask=key_mask,
         note=note.strip(),
+        model=model.strip(),
     )
     return {"success": True, "target": target}
 
@@ -254,6 +256,8 @@ def get_report_markdown(db_path: str, report_id: str = "latest") -> dict[str, An
     if not outcome.get("success"):
         return {"text": f"_{outcome.get('error_text', 'no report')}_"}
     report = outcome["report"]
+    if report["kind"] == "fingerprint":
+        return {"text": _render_fingerprint_markdown(report)}
     summary = report.get("summary", {})
 
     lines = [
@@ -288,6 +292,168 @@ def get_report_markdown(db_path: str, report_id: str = "latest") -> dict[str, An
     return {"text": "\n".join(lines)}
 
 
+def _render_fingerprint_markdown(report: dict[str, Any]) -> str:
+    """Render a fingerprint report: verdict, evidence tables, reasons."""
+    s = report.get("summary", {})
+    verdict = report.get("verdict") or "—"
+    label = fingerprint.VERDICT_LABELS_RU.get(verdict, verdict)
+    lines = [
+        "# RelayCheck: fingerprint модели",
+        "",
+        f"- **Дата:** {report['created_at']}",
+        f"- **Цель:** {report['target']}",
+        f"- **Модель (заявлена):** `{s.get('model', '—')}`",
+        f"- **Профиль:** {s.get('profile_id') or 'нет в базе — эвристики'}",
+        f"- **Вердикт:** {label}",
+        f"- **Скор:** {report['score']}",
+        f"- **Проб:** {s.get('probe_count', '—')} · **Длительность:** {report['latency_ms']} мс",
+        "",
+        "## Почему такой вердикт",
+        "",
+    ]
+    reasons = s.get("reasons") or []
+    lines += [f"- {r}" for r in reasons] or ["- (нет причин)"]
+
+    tok = s.get("tokenizer") or {}
+    pairs = tok.get("pairs") or []
+    if pairs:
+        lines += [
+            "",
+            "## Tokenizer deltas (инвариантны к chat-template relay)",
+            "",
+            "| Проба | Δ токенов (наблюдение) | Ожидается | Совпадение |",
+            "| --- | --- | --- | --- |",
+        ]
+        for p in pairs:
+            match = p.get("match")
+            match_txt = {True: "✅", False: "❌", None: "—"}[match]
+            lines.append(
+                f"| {p['id']} | {p.get('observed_delta')} | "
+                f"{p.get('expected_delta')}±{p.get('tolerance_pct')}% | {match_txt} |"
+            )
+
+    cap = s.get("capability") or {}
+    probes = cap.get("probes") or []
+    if probes:
+        lines += ["", "## Capability-пробы", ""]
+        for p in probes:
+            ok = p.get("ok")
+            mark = {True: "✅", False: "❌", None: "—"}[ok]
+            lines.append(f"- {mark} `{p['id']}` — {p.get('detail', '')}")
+
+    cons = s.get("consistency") or {}
+    stream = s.get("stream") or {}
+    meta = s.get("metadata") or {}
+    lines += [
+        "",
+        "## Прочее",
+        "",
+        f"- **Split-half consistency:** {'одинаковые ответы ✅' if cons.get('identical') else 'ответы различаются ⚠️' if cons.get('answered') else 'нет данных'}",
+        f"- **Stream:** {'ок' if stream.get('ok') else stream.get('detail', 'ошибка')}"
+        + (f" · TTFT {stream.get('ttft_ms')} мс" if stream.get('ttft_ms') is not None else ""),
+        f"- **Model echo:** `{meta.get('model_echo') or '—'}`",
+        f"- **system_fingerprint:** `{meta.get('system_fingerprint') or '—'}`",
+        f"- **ID prefix:** `{meta.get('id_prefix') or '—'}`",
+        "",
+        "> Вердикт — эвристика, не доказательство. Ручная проверка на реальных задачах обязательна.",
+    ]
+    return "\n".join(lines)
+
+
 def refresh(db_path: str) -> dict[str, Any]:
     """No-op used by table rowActions to force a refetch of the source table."""
     return {"ok": True}
+
+
+# ── Model fingerprint (Этап 2) ──────────────────────────────────────────────
+
+
+def verify_model(
+    db_path: str,
+    *,
+    model: str,
+    target_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
+) -> dict[str, Any]:
+    """Fingerprint a model behind a relay: is it really the claimed model?
+
+    Either ``target_id`` (saved target) or ad-hoc ``base_url`` + ``api_key``.
+    Runs the probe battery (tokenizer deltas, capability, consistency,
+    streaming shape, metadata) and returns verdict + score + evidence.
+    Writes a ``fingerprint`` report and stamps the target row.
+    """
+    target_name = "ad-hoc"
+    if target_id:
+        target = storage.get_target(db_path, target_id)
+        if target is None:
+            return {"success": False, "error_text": f"target {target_id!r} not found"}
+        if not target.get("api_key_enc"):
+            return {
+                "success": False,
+                "error_text": "у цели нет сохранённого ключа (persistKey был выключен)",
+            }
+        base_url = str(target["base_url"])
+        api_key = crypto.decrypt(str(target["api_key_enc"]))
+        target_name = str(target["name"])
+        if not model.strip() and target.get("model"):
+            model = str(target["model"]).strip()
+    else:
+        if not base_url.strip() or not api_key.strip():
+            raise ValueError("baseUrl and apiKey are required (or pass targetId)")
+    if not model.strip():
+        raise ValueError("model is required for fingerprint")
+    model = model.strip()
+
+    base_url = client.normalize_base_url(base_url)
+    timeout = _timeout(db_path)
+
+    proto = client.detect_protocol(base_url, api_key, timeout)
+    protocol = proto.get("protocol") or "openai"
+
+    fp = fingerprint.run_fingerprint(base_url, api_key, model, protocol, timeout)
+    verdict = fp["verdict"]
+    score = fp["score"]
+
+    summary = {
+        "model": model,
+        "protocol": protocol,
+        "profile_id": fp.get("profile_id"),
+        "tokenizer": fp["tokenizer"],
+        "capability": fp["capability"],
+        "consistency": fp["consistency"],
+        "stream": fp["stream"],
+        "metadata": fp["metadata"],
+        "reasons": fp["reasons"],
+        "probe_count": fp["probe_count"],
+    }
+    report = storage.add_report(
+        db_path,
+        kind="fingerprint",
+        target_id=target_id or None,
+        target_name=target_name,
+        base_url=base_url,
+        verdict=verdict,
+        score=score,
+        latency_ms=fp["duration_ms"],
+        summary=summary,
+    )
+    if target_id:
+        storage.update_target_last_check(db_path, target_id, verdict=verdict, score=score)
+
+    return {
+        "success": True,
+        "verdict": verdict,
+        "score": score,
+        "model": model,
+        "profile_id": fp.get("profile_id"),
+        "reasons": fp["reasons"],
+        "tokenizer": fp["tokenizer"],
+        "capability": fp["capability"],
+        "consistency": fp["consistency"],
+        "stream": fp["stream"],
+        "metadata": fp["metadata"],
+        "probe_count": fp["probe_count"],
+        "duration_ms": fp["duration_ms"],
+        "report_id": report["id"],
+    }

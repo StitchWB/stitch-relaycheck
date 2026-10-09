@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "note": "Estimated tokenizer deltas between the short and long probe strings (template-offset invariant). Values are approximate, tolerance_pct absorbs tokenizer minor-version drift; a relay serving a DIFFERENT model family lands far outside tolerance. Profiles are best-effort v1 — extend freely.",
+  "profiles": {
+    "gpt-5": {
+      "family": "openai",
+      "tokenizer": "o200k",
+      "tokenizer_deltas": {
+        "latin": { "expected": 13, "tolerance_pct": 30 },
+        "code": { "expected": 18, "tolerance_pct": 30 },
+        "unicode": { "expected": 11, "tolerance_pct": 30 }
+      },
+      "capabilities": { "json_mode": true, "tools": true, "streaming": true },
+      "metadata": { "system_fingerprint": "fp", "id_prefix": "chatcmpl" }
+    },
+    "gpt-4o": {
+      "family": "openai",
+      "tokenizer": "cl100k",
+      "tokenizer_deltas": {
+        "latin": { "expected": 14, "tolerance_pct": 30 },
+        "code": { "expected": 19, "tolerance_pct": 30 },
+        "unicode": { "expected": 15, "tolerance_pct": 30 }
+      },
+      "capabilities": { "json_mode": true, "tools": true, "streaming": true },
+      "metadata": { "system_fingerprint": "fp", "id_prefix": "chatcmpl" }
+    },
+    "claude-opus-4-8": {
+      "family": "anthropic",
+      "tokenizer_deltas": {
+        "latin": { "expected": 14, "tolerance_pct": 30 },
+        "code": { "expected": 19, "tolerance_pct": 30 },
+        "unicode": { "expected": 16, "tolerance_pct": 30 }
+      },
+      "capabilities": { "json_mode": true, "tools": true, "streaming": true },
+      "metadata": { "system_fingerprint": null, "id_prefix": "msg" }
+    },
+    "claude-sonnet-4-5": {
+      "family": "anthropic",
+      "tokenizer_deltas": {
+        "latin": { "expected": 14, "tolerance_pct": 30 },
+        "code": { "expected": 19, "tolerance_pct": 30 },
+        "unicode": { "expected": 16, "tolerance_pct": 30 }
+      },
+      "capabilities": { "json_mode": true, "tools": true, "streaming": true },
+      "metadata": { "system_fingerprint": null, "id_prefix": "msg" }
+    },
+    "gemini-3-pro": {
+      "family": "google",
+      "tokenizer": "sentencepiece",
+      "tokenizer_deltas": {
+        "latin": { "expected": 15, "tolerance_pct": 30 },
+        "code": { "expected": 20, "tolerance_pct": 30 },
+        "unicode": { "expected": 10, "tolerance_pct": 30 }
+      },
+      "capabilities": { "json_mode": true, "tools": true, "streaming": true },
+      "metadata": { "system_fingerprint": null, "id_prefix": null }
+    },
+    "deepseek-v3": {
+      "family": "deepseek",
+      "tokenizer_deltas": {
+        "latin": { "expected": 14, "tolerance_pct": 30 },
+        "code": { "expected": 19, "tolerance_pct": 30 },
+        "unicode": { "expected": 15, "tolerance_pct": 30 }
+      },
+      "capabilities": { "json_mode": true, "tools": true, "streaming": true },
+      "metadata": { "system_fingerprint": "fp", "id_prefix": "chatcmpl" }
+    },
+    "qwen3": {
+      "family": "qwen",
+      "tokenizer_deltas": {
+        "latin": { "expected": 14, "tolerance_pct": 30 },
+        "code": { "expected": 19, "tolerance_pct": 30 },
+        "unicode": { "expected": 14, "tolerance_pct": 30 }
+      },
+      "capabilities": { "json_mode": true, "tools": true, "streaming": true },
+      "metadata": { "system_fingerprint": "fp", "id_prefix": "chatcmpl" }
+    }
+  },
+  "aliases": {
+    "gpt-5": "gpt-5",
+    "gpt-5-chat-latest": "gpt-5",
+    "gpt-4o": "gpt-4o",
+    "gpt-4o-mini": "gpt-4o",
+    "claude-opus-4-8": "claude-opus-4-8",
+    "claude-sonnet-4-5": "claude-sonnet-4-5",
+    "claude-sonnet-4-5-2026": "claude-sonnet-4-5",
+    "gemini-3-pro": "gemini-3-pro",
+    "gemini-3-pro-preview": "gemini-3-pro",
+    "deepseek-v3": "deepseek-v3",
+    "deepseek-chat": "deepseek-v3",
+    "qwen3": "qwen3",
+    "qwen3-235b": "qwen3"
+  }
+}

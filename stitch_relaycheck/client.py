@@ -20,6 +20,7 @@ The response *shape* decides the detected protocol.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Any
@@ -266,3 +267,284 @@ def check_known_endpoint_shape(base_url: str, timeout: float = 5.0) -> dict[str,
     except httpx.HTTPError:
         pass
     return {"software": software, "hints": hints, "normalized_url": normalized}
+
+
+# ── Chat completions (fingerprint / watering probes) ────────────────────────
+
+
+def _short_error(response: Any, api_key: str = "") -> str:
+    """Compact, key-free error text from an HTTP response."""
+    try:
+        body = response.text
+    except Exception:  # noqa: BLE001 — best effort
+        body = ""
+    body = " ".join(body.split())[:200]
+    if api_key:
+        body = redact(body, api_key)
+    return f"HTTP {response.status_code}" + (f": {body}" if body else "")
+
+
+def _extract_text_from_content(content: Any) -> str:
+    """OpenAI content may be a string or a list of typed parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(str(part.get("text", "")))
+            elif isinstance(part, dict) and "text" in part:
+                parts.append(str(part["text"]))
+        return "".join(parts)
+    return ""
+
+
+def _normalize_chat_payload(
+    data: dict[str, Any], latency_ms: int, protocol: str
+) -> dict[str, Any]:
+    """Normalize OpenAI- or Anthropic-shaped chat payloads to one shape."""
+    out: dict[str, Any] = {
+        "ok": True,
+        "status": 200,
+        "latency_ms": latency_ms,
+        "text": "",
+        "model_echo": None,
+        "system_fingerprint": None,
+        "usage": None,
+        "finish_reason": None,
+        "response_id": None,
+    }
+    try:
+        if protocol == "anthropic":
+            blocks = data.get("content")
+            if isinstance(blocks, list):
+                out["text"] = "".join(
+                    str(b.get("text", ""))
+                    for b in blocks
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            out["model_echo"] = data.get("model")
+            usage = data.get("usage")
+            if isinstance(usage, dict):
+                out["usage"] = {
+                    "prompt_tokens": usage.get("input_tokens"),
+                    "completion_tokens": usage.get("output_tokens"),
+                    "total_tokens": (usage.get("input_tokens") or 0)
+                    + (usage.get("output_tokens") or 0),
+                }
+            out["finish_reason"] = data.get("stop_reason")
+            out["response_id"] = data.get("id")
+        else:
+            choices = data.get("choices")
+            if isinstance(choices, list) and choices:
+                first = choices[0]
+                if isinstance(first, dict):
+                    message = first.get("message")
+                    if isinstance(message, dict):
+                        out["text"] = _extract_text_from_content(message.get("content"))
+                    out["finish_reason"] = first.get("finish_reason")
+            out["model_echo"] = data.get("model")
+            out["system_fingerprint"] = data.get("system_fingerprint")
+            usage = data.get("usage")
+            if isinstance(usage, dict):
+                out["usage"] = {
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                }
+            out["response_id"] = data.get("id")
+    except (AttributeError, TypeError, KeyError):
+        pass
+    return out
+
+
+def _sse_event_name(event: dict[str, Any], protocol: str) -> str:
+    """Short type name of one SSE event (for streaming-shape fingerprint)."""
+    if protocol == "anthropic":
+        return str(event.get("type", "unknown"))
+    choices = event.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        delta = choices[0].get("delta")
+        if isinstance(delta, dict):
+            if delta.get("role"):
+                return "role"
+            if delta.get("content"):
+                return "content"
+            if delta.get("tool_calls"):
+                return "tool_calls"
+        if choices[0].get("finish_reason"):
+            return "finish"
+    if event.get("usage"):
+        return "usage"
+    return "other"
+
+
+def chat_completion(
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    protocol: str = "openai",
+    max_tokens: int = 16,
+    temperature: float = 0.0,
+    stream: bool = False,
+    response_format: dict[str, Any] | None = None,
+    timeout: float = DEFAULT_TIMEOUT_S,
+) -> dict[str, Any]:
+    """POST one chat completion; returns a normalized, key-free result.
+
+    Success shape:
+      ``{"ok": True, "status": 200, "latency_ms", "text", "model_echo",
+         "system_fingerprint", "usage": {...}, "finish_reason", "response_id",
+         "ttft_ms"?, "sse_events"?}``
+    Failure shape:
+      ``{"ok": False, "status"?, "latency_ms"?, "error_text"}``
+    """
+    import httpx
+
+    normalized = normalize_base_url(base_url)
+    started = time.monotonic()
+
+    if protocol == "anthropic":
+        url = f"{normalized}/v1/messages"
+        headers = _auth_headers(api_key, "anthropic")
+        sys_parts = [str(m.get("content", "")) for m in messages if m.get("role") == "system"]
+        body: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [
+                {"role": m.get("role", "user"), "content": m.get("content", "")}
+                for m in messages
+                if m.get("role") != "system"
+            ],
+            "stream": stream,
+        }
+        if sys_parts:
+            body["system"] = "\n".join(sys_parts)
+    else:
+        url = f"{normalized}/v1/chat/completions"
+        headers = _auth_headers(api_key, "openai")
+        body = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": stream,
+        }
+        if response_format is not None:
+            body["response_format"] = response_format
+        if stream:
+            body["stream_options"] = {"include_usage": True}
+
+    try:
+        with httpx.Client(timeout=timeout) as http:
+            if not stream:
+                response = http.post(url, headers=headers, json=body)
+                latency_ms = int((time.monotonic() - started) * 1000)
+                if response.status_code != 200:
+                    return {
+                        "ok": False,
+                        "status": response.status_code,
+                        "latency_ms": latency_ms,
+                        "error_text": _short_error(response, api_key),
+                    }
+                try:
+                    data = response.json()
+                except ValueError:
+                    return {
+                        "ok": False,
+                        "status": 200,
+                        "latency_ms": latency_ms,
+                        "error_text": "200 but body is not JSON",
+                    }
+                return _normalize_chat_payload(data, latency_ms, protocol)
+
+            # Streaming: collect SSE event types, text, ttft, usage/model.
+            sse_events: list[str] = []
+            chunks: list[str] = []
+            ttft_ms: int | None = None
+            model_echo: str | None = None
+            system_fingerprint: str | None = None
+            usage: dict[str, Any] | None = None
+            with http.stream("POST", url, headers=headers, json=body) as response:
+                if response.status_code != 200:
+                    response.read()
+                    latency_ms = int((time.monotonic() - started) * 1000)
+                    return {
+                        "ok": False,
+                        "status": response.status_code,
+                        "latency_ms": latency_ms,
+                        "error_text": _short_error(response, api_key),
+                    }
+                for line in response.iter_lines():
+                    if ttft_ms is None and line:
+                        ttft_ms = int((time.monotonic() - started) * 1000)
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:") :].strip()
+                    if payload == "[DONE]":
+                        sse_events.append("[DONE]")
+                        continue
+                    try:
+                        event = json.loads(payload)
+                    except ValueError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    sse_events.append(_sse_event_name(event, protocol))
+                    if protocol == "anthropic":
+                        if event.get("type") == "message_start":
+                            msg = event.get("message")
+                            if isinstance(msg, dict):
+                                model_echo = msg.get("model")
+                        if event.get("type") == "message_delta":
+                            u = event.get("usage")
+                            if isinstance(u, dict) and u.get("output_tokens") is not None:
+                                usage = {
+                                    "prompt_tokens": None,
+                                    "completion_tokens": u.get("output_tokens"),
+                                    "total_tokens": None,
+                                }
+                        delta = event.get("delta")
+                        if isinstance(delta, dict) and delta.get("type") == "text_delta":
+                            chunks.append(str(delta.get("text", "")))
+                    else:
+                        if event.get("model"):
+                            model_echo = event.get("model")
+                        if event.get("system_fingerprint"):
+                            system_fingerprint = event.get("system_fingerprint")
+                        choices = event.get("choices")
+                        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                            delta = choices[0].get("delta")
+                            if isinstance(delta, dict) and delta.get("content"):
+                                chunks.append(str(delta["content"]))
+                        if event.get("usage"):
+                            u = event["usage"]
+                            usage = {
+                                "prompt_tokens": u.get("prompt_tokens"),
+                                "completion_tokens": u.get("completion_tokens"),
+                                "total_tokens": u.get("total_tokens"),
+                            }
+            latency_ms = int((time.monotonic() - started) * 1000)
+            return {
+                "ok": True,
+                "status": 200,
+                "latency_ms": latency_ms,
+                "ttft_ms": ttft_ms,
+                "text": "".join(chunks),
+                "model_echo": model_echo,
+                "system_fingerprint": system_fingerprint,
+                "usage": usage,
+                "sse_events": sse_events,
+            }
+    except httpx.TimeoutException:
+        return {"ok": False, "latency_ms": int((time.monotonic() - started) * 1000),
+                "error_text": "таймаут запроса"}
+    except httpx.ConnectError:
+        return {"ok": False, "latency_ms": int((time.monotonic() - started) * 1000),
+                "error_text": "не удалось подключиться (DNS/сеть/блокировка)"}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "latency_ms": int((time.monotonic() - started) * 1000),
+                "error_text": f"HTTP-ошибка: {type(exc).__name__}"}

@@ -190,3 +190,123 @@ class TestCheckTarget:
         result = service.check_target(env, out["target"]["id"])
         assert result["success"] is False
         assert "persistKey" in result["error_text"]
+
+
+def _fake_fp_result(verdict="authentic", score=100):
+    return {
+        "model": "mock-gpt",
+        "profile_id": "mock-gpt",
+        "tokenizer": {
+            "pairs": [
+                {"id": "latin", "observed_delta": 16, "expected_delta": 16, "tolerance_pct": 30, "match": True},
+                {"id": "code", "observed_delta": 15, "expected_delta": 17, "tolerance_pct": 30, "match": True},
+            ],
+            "matched": 2,
+            "answered": 2,
+            "ratio": 1.0,
+        },
+        "capability": {
+            "probes": [{"id": "arithmetic", "ok": True, "detail": "passed"}],
+            "passed": 1,
+            "expected": 1,
+            "ratio": 1.0,
+        },
+        "consistency": {"identical": True, "answered": 2},
+        "stream": {"ok": True, "ttft_ms": 120, "events": ["role", "content", "[DONE]"]},
+        "metadata": {"model_echo": "mock-gpt", "system_fingerprint": "fp_x", "id_prefix": "chatcmpl"},
+        "verdict": verdict,
+        "score": score,
+        "reasons": ["совпадение токенайзера: 100%"],
+        "probe_count": 12,
+        "duration_ms": 4321,
+    }
+
+
+class TestVerifyModel:
+    def test_model_required(self, env):
+        with pytest.raises(ValueError):
+            service.verify_model(env, model="")
+        # Unknown target id is an API-result failure, not a validation error.
+        out = service.verify_model(env, model="", target_id="nope")
+        assert out["success"] is False
+
+    def test_adhoc_requires_url_and_key(self, env):
+        with pytest.raises(ValueError):
+            service.verify_model(env, model="m", base_url="", api_key="")
+
+    def test_missing_target(self, env):
+        out = service.verify_model(env, model="m", target_id="nope")
+        assert out["success"] is False
+        assert "not found" in out["error_text"]
+
+    def test_target_model_fallback(self, env, monkeypatch):
+        """Model may come from the saved target when not passed explicitly."""
+        out = service.save_target(
+            env,
+            name="r",
+            base_url="http://127.0.0.1:1",
+            api_key="sk-test-fingerprint-key",
+            model="mock-gpt",
+        )
+        tid = out["target"]["id"]
+        monkeypatch.setattr(
+            client, "detect_protocol", lambda *a, **k: {"success": False, "error_text": "x"}
+        )
+        monkeypatch.setattr(
+            "stitch_relaycheck.fingerprint.run_fingerprint",
+            lambda *a, **k: _fake_fp_result(),
+        )
+        result = service.verify_model(env, model="", target_id=tid)
+        assert result["success"] is True
+        assert result["model"] == "mock-gpt"
+        assert result["verdict"] == "authentic"
+        assert result["score"] == 100
+        assert result["report_id"]
+
+        report = storage.get_report(env, result["report_id"])
+        assert report is not None
+        assert report["kind"] == "fingerprint"
+        assert report["verdict"] == "authentic"
+        assert report["score"] == 100
+        # Key never leaks into the report.
+        assert "sk-test-fingerprint-key" not in str(report["summary"])
+
+        # Target row stamped.
+        row = storage.list_targets(env)[0]
+        assert row["last_verdict"] == "authentic"
+        assert row["last_score"] == 100
+
+    def test_adhoc_fingerprint(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client,
+            "detect_protocol",
+            lambda *a, **k: {"success": True, "protocol": "openai"},
+        )
+        monkeypatch.setattr(
+            "stitch_relaycheck.fingerprint.run_fingerprint",
+            lambda *a, **k: _fake_fp_result(verdict="substituted", score=12),
+        )
+        result = service.verify_model(
+            env, model="gpt-5", base_url="https://relay.example.com", api_key="sk-x"
+        )
+        assert result["success"] is True
+        assert result["verdict"] == "substituted"
+        report = storage.get_report(env, result["report_id"])
+        assert report is not None
+        assert report["base_url"] == "https://relay.example.com"
+
+    def test_fingerprint_markdown(self, env, monkeypatch):
+        monkeypatch.setattr(
+            client, "detect_protocol", lambda *a, **k: {"success": True, "protocol": "openai"}
+        )
+        monkeypatch.setattr(
+            "stitch_relaycheck.fingerprint.run_fingerprint",
+            lambda *a, **k: _fake_fp_result(),
+        )
+        service.verify_model(
+            env, model="mock-gpt", base_url="https://a.com", api_key="sk-x"
+        )
+        md = service.get_report_markdown(env, "latest")
+        assert "fingerprint" in md["text"]
+        assert "authentic" in md["text"]
+        assert "Tokenizer deltas" in md["text"]

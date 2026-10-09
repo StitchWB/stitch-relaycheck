@@ -106,6 +106,7 @@ def _handle_save_target(params: dict[str, Any]) -> dict[str, Any]:
     base_url = str(params.get("baseUrl", params.get("base_url", "")))
     api_key = str(params.get("apiKey", params.get("api_key", "")))
     note = str(params.get("note", "") or "")
+    model = str(params.get("model", "") or "")
     persist_key = params.get("persistKey", params.get("persist_key", True))
     return service.save_target(
         ctx.db_path,
@@ -113,6 +114,7 @@ def _handle_save_target(params: dict[str, Any]) -> dict[str, Any]:
         base_url=base_url,
         api_key=api_key,
         note=note,
+        model=model,
         persist_key=bool(persist_key),
     )
 
@@ -161,6 +163,21 @@ def _handle_refresh(params: dict[str, Any]) -> dict[str, Any]:
     return service.refresh(ctx.db_path)
 
 
+def _handle_verify_model(params: dict[str, Any]) -> dict[str, Any]:
+    """Fingerprint a model behind a relay (saved target or ad-hoc endpoint)."""
+    model = str(params.get("model", "") or "")
+    target_id = str(params.get("targetId", params.get("target_id", "")) or "")
+    base_url = str(params.get("baseUrl", params.get("base_url", "")))
+    api_key = str(params.get("apiKey", params.get("api_key", "")))
+    return service.verify_model(
+        ctx.db_path,
+        model=model,
+        target_id=target_id,
+        base_url=base_url,
+        api_key=api_key,
+    )
+
+
 def _handle_get_settings(params: dict[str, Any]) -> dict[str, Any]:
     """Return effective plugin settings."""
     return {"success": True, "settings": service.get_settings(ctx.db_path)}
@@ -197,6 +214,7 @@ def main() -> None:
     server.register("list_reports", _handle_list_reports)
     server.register("get_report", _handle_get_report)
     server.register("get_report_markdown", _handle_get_report_markdown)
+    server.register("verify_model", _handle_verify_model)
     server.register("refresh", _handle_refresh)
     server.register("get_settings", _handle_get_settings)
     server.register("set_settings", _handle_set_settings)

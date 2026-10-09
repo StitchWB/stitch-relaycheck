@@ -20,7 +20,7 @@ behind that endpoint.
 |--- | --- | --- |
 | 1 | Quick endpoint check: connectivity, protocol detect, model list, latency | ✅ v0.1.0 |
 | 2 | Saved targets with encrypted keys + check history + markdown reports | ✅ v0.1.0 |
-| 3 | Model authenticity fingerprint (tokenizer/capability/metadata probes, verdict + score) | 🚧 |
+| 3 | Model authenticity fingerprint (tokenizer/capability/metadata probes, verdict + score) | ✅ v0.2.0 |
 | 4 | Watering detection (relay vs reference answer comparison) | 🚧 |
 | 5 | Security scan: canary probes, unsolicited `tool_use`, HoloNe-rule engine, IOC/TLS | 🚧 |
 | 6 | Performance series (TTFT/TPS/uptime), token-accounting, balance parsers | 🚧 |
@@ -29,21 +29,23 @@ behind that endpoint.
 ## Commands
 
 `health_check`, `check_endpoint`, `save_target`, `list_targets`, `check_target`,
-`delete_target`, `list_reports`, `get_report`, `get_report_markdown`, `refresh`,
-`get_settings`, `set_settings`.
+`verify_model`, `delete_target`, `list_reports`, `get_report`, `get_report_markdown`,
+`refresh`, `get_settings`, `set_settings`.
 
 ## Layout
 
 ```
 plugin.json                 manifest (schema v2, declarative UI + i18n + commands)
+data/fingerprints.json      model fingerprint profile DB (tokenizer deltas, capabilities)
 stitch_relaycheck/
   __main__.py               JSON-RPC entry point (RpcPluginServer)
   service.py                command logic (thin orchestration, security contract)
-  client.py                 HTTP layer: protocol detect, model list parsing, probes
+  client.py                 HTTP layer: protocol detect, model list, chat completions
+  fingerprint.py            model authenticity probes + verdict aggregation
   storage.py                SQLite (targets, reports, settings)
   crypto.py                 Fernet at-rest encryption (same scheme as core / stitch-totp)
   _vendor/rpc_server.py     vendored RpcPluginServer (regenerated; do not edit)
-tests/                      protocol + unit tests (no network)
+tests/                      protocol + unit + e2e (mock relay on 127.0.0.1, no network)
 ```
 
 ## Development

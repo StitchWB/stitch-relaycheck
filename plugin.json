@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -17,8 +17,8 @@
   "outputs": [],
   "signature": "",
   "description": {
-    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, определение протокола, латентность, история проверок и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn. Первый релиз: быстрый чек endpoint. Далее — fingerprint оригинальности модели, watering-detector и security-скан по правилам HoloNe.",
-    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, protocol detection, latency, check history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available. First release: quick endpoint check. Next: model authenticity fingerprinting, watering detection and HoloNe-rule security scan."
+    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, определение протокола, латентность, fingerprint оригинальности модели (настоящая ли модель за relay), история проверок и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn. Далее — watering-detector и security-скан по правилам HoloNe.",
+    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, protocol detection, latency, model authenticity fingerprint (is the claimed model really behind the relay), check history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available. Next: watering detection and HoloNe-rule security scan."
   },
   "author": "StitchWB",
   "category": "ai-tools",
@@ -45,9 +45,26 @@
         "en": "Local check history and markdown reports"
       },
       "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "Fingerprint оригинальности модели (tokenizer deltas, capability, consistency)",
+        "en": "Model authenticity fingerprint (tokenizer deltas, capability, consistency)"
+      },
+      "status": "beta"
     }
   ],
   "changelog": [
+    {
+      "version": "0.2.0",
+      "date": "2026-10-09",
+      "changes": [
+        {
+          "ru": "Fingerprint: команда verify_model (tokenizer deltas, capability-пробы, split-half consistency, stream shape, metadata), база профилей моделей, вердикты authentic/likely_authentic/indeterminate/suspicious/substituted",
+          "en": "Fingerprint: verify_model command (tokenizer deltas, capability probes, split-half consistency, stream shape, metadata), model profile DB, verdicts authentic/likely_authentic/indeterminate/suspicious/substituted"
+        }
+      ]
+    },
     {
       "version": "0.1.0",
       "date": "2026-10-09",
@@ -83,6 +100,10 @@
       },
       {
         "name": "check_target",
+        "readonly": false
+      },
+      {
+        "name": "verify_model",
         "readonly": false
       },
       {
@@ -173,6 +194,23 @@
                   "model": "qc-model"
                 },
                 "variant": "primary"
+              },
+              {
+                "kind": "button",
+                "id": "qc-fp-btn",
+                "label": "stitch-relaycheck.quick.fingerprint",
+                "command": "verify_model",
+                "params": {
+                  "baseUrl": "",
+                  "apiKey": "",
+                  "model": ""
+                },
+                "paramsFrom": {
+                  "baseUrl": "qc-url",
+                  "apiKey": "qc-key",
+                  "model": "qc-model"
+                },
+                "variant": "secondary"
               }
             ]
           },
@@ -193,12 +231,20 @@
                     "label": "stitch-relaycheck.targets.col.baseUrl"
                   },
                   {
+                    "key": "model",
+                    "label": "stitch-relaycheck.targets.col.model"
+                  },
+                  {
                     "key": "key_mask",
                     "label": "stitch-relaycheck.targets.col.key"
                   },
                   {
                     "key": "last_verdict",
                     "label": "stitch-relaycheck.targets.col.verdict"
+                  },
+                  {
+                    "key": "last_score",
+                    "label": "stitch-relaycheck.targets.col.score"
                   },
                   {
                     "key": "last_checked_at",
@@ -215,6 +261,18 @@
                     "command": "check_target",
                     "paramsFromRow": {
                       "id": "id"
+                    }
+                  },
+                  {
+                    "id": "fp-target-row",
+                    "label": "stitch-relaycheck.targets.fingerprint",
+                    "command": "verify_model",
+                    "params": {
+                      "model": ""
+                    },
+                    "paramsFromRow": {
+                      "targetId": "id",
+                      "model": "model"
                     }
                   },
                   {
@@ -257,6 +315,13 @@
               {
                 "kind": "field",
                 "field": "text",
+                "id": "t-model",
+                "label": "stitch-relaycheck.addTarget.model",
+                "placeholder": "stitch-relaycheck.addTarget.modelPlaceholder"
+              },
+              {
+                "kind": "field",
+                "field": "text",
                 "id": "t-note",
                 "label": "stitch-relaycheck.addTarget.note"
               },
@@ -276,6 +341,7 @@
                   "name": "",
                   "baseUrl": "",
                   "apiKey": "",
+                  "model": "",
                   "note": "",
                   "persistKey": true
                 },
@@ -283,6 +349,7 @@
                   "name": "t-name",
                   "baseUrl": "t-url",
                   "apiKey": "t-key",
+                  "model": "t-model",
                   "note": "t-note",
                   "persistKey": "t-persist"
                 },
@@ -405,20 +472,24 @@
             "baseUrlPlaceholder": "https://relay.example.com/v1",
             "apiKey": "API Key (не сохраняется)",
             "apiKeyPlaceholder": "sk-... — только для этой проверки",
-            "model": "Модель (опционально)",
-            "modelPlaceholder": "например, claude-opus-4-8 — проверить наличие",
-            "check": "Проверить"
+            "model": "Модель",
+            "modelPlaceholder": "например, claude-opus-4-8",
+            "check": "Проверить",
+            "fingerprint": "Fingerprint модели"
           },
           "targets": {
             "title": "Мои цели (relay)",
             "col": {
               "name": "Имя",
               "baseUrl": "Base URL",
+              "model": "Модель",
               "key": "Ключ",
               "verdict": "Вердикт",
+              "score": "Скор",
               "checked": "Проверен"
             },
             "check": "Чек",
+            "fingerprint": "Fingerprint",
             "delete": "Удалить"
           },
           "addTarget": {
@@ -427,6 +498,8 @@
             "baseUrl": "Base URL",
             "apiKey": "API Key",
             "apiKeyPlaceholder": "ключ шифруется локально (Fernet)",
+            "model": "Модель по умолчанию",
+            "modelPlaceholder": "например, gpt-5 — для fingerprint по кнопке",
             "note": "Заметка",
             "persistKey": "Сохранить ключ (зашифрован)",
             "save": "Сохранить цель"
@@ -464,20 +537,24 @@
             "baseUrlPlaceholder": "https://relay.example.com/v1",
             "apiKey": "API Key (not stored)",
             "apiKeyPlaceholder": "sk-... — for this check only",
-            "model": "Model (optional)",
-            "modelPlaceholder": "e.g. claude-opus-4-8 — check availability",
-            "check": "Check"
+            "model": "Model",
+            "modelPlaceholder": "e.g. claude-opus-4-8",
+            "check": "Check",
+            "fingerprint": "Fingerprint model"
           },
           "targets": {
             "title": "My targets (relays)",
             "col": {
               "name": "Name",
               "baseUrl": "Base URL",
+              "model": "Model",
               "key": "Key",
               "verdict": "Verdict",
+              "score": "Score",
               "checked": "Checked"
             },
             "check": "Check",
+            "fingerprint": "Fingerprint",
             "delete": "Delete"
           },
           "addTarget": {
@@ -486,6 +563,8 @@
             "baseUrl": "Base URL",
             "apiKey": "API Key",
             "apiKeyPlaceholder": "key is encrypted locally (Fernet)",
+            "model": "Default model",
+            "modelPlaceholder": "e.g. gpt-5 — for the fingerprint button",
             "note": "Note",
             "persistKey": "Store key (encrypted)",
             "save": "Save target"

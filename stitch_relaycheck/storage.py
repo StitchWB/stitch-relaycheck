@@ -51,6 +51,7 @@ def migrate(db_path: str) -> None:
                 api_key_enc TEXT,
                 key_mask TEXT NOT NULL DEFAULT '',
                 note TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
                 is_reference INTEGER NOT NULL DEFAULT 0,
                 last_verdict TEXT,
                 last_score INTEGER,
@@ -60,6 +61,10 @@ def migrate(db_path: str) -> None:
             )
             """
         )
+        # v2 migration: add the model column to databases created by v1.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(targets)").fetchall()}
+        if "model" not in cols:
+            conn.execute("ALTER TABLE targets ADD COLUMN model TEXT NOT NULL DEFAULT ''")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS reports (
@@ -100,6 +105,7 @@ def upsert_target(
     api_key_enc: str | None,
     key_mask: str,
     note: str = "",
+    model: str = "",
     is_reference: bool = False,
     target_id: str | None = None,
 ) -> dict[str, Any]:
@@ -115,9 +121,9 @@ def upsert_target(
             conn.execute(
                 """
                 INSERT INTO targets (
-                    id, name, base_url, api_key_enc, key_mask, note,
+                    id, name, base_url, api_key_enc, key_mask, note, model,
                     is_reference, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tid,
@@ -126,6 +132,7 @@ def upsert_target(
                     api_key_enc,
                     key_mask,
                     note,
+                    model,
                     1 if is_reference else 0,
                     now,
                     now,
@@ -136,7 +143,7 @@ def upsert_target(
                 """
                 UPDATE targets SET
                     name = ?, base_url = ?, api_key_enc = ?, key_mask = ?,
-                    note = ?, is_reference = ?, updated_at = ?
+                    note = ?, model = ?, is_reference = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -145,6 +152,7 @@ def upsert_target(
                     api_key_enc,
                     key_mask,
                     note,
+                    model,
                     1 if is_reference else 0,
                     now,
                     tid,
@@ -175,7 +183,7 @@ def list_targets(db_path: str) -> list[dict[str, Any]]:
     try:
         rows = conn.execute(
             """
-            SELECT id, name, base_url, key_mask, note, is_reference,
+            SELECT id, name, base_url, key_mask, note, model, is_reference,
                    last_verdict, last_score, last_checked_at, created_at
             FROM targets
             ORDER BY last_checked_at DESC, created_at DESC
@@ -228,6 +236,7 @@ def _target_row_to_dict(row: Any) -> dict[str, Any]:
         "base_url": row["base_url"],
         "key_mask": row["key_mask"],
         "note": row["note"],
+        "model": row["model"],
         "is_reference": bool(row["is_reference"]),
         "last_verdict": row["last_verdict"] or "—",
         "last_score": row["last_score"] if row["last_score"] is not None else "—",
@@ -318,6 +327,7 @@ def _report_row_to_dict(row: Any) -> dict[str, Any]:
         "id": row["id"],
         "target_id": row["target_id"],
         "target": row["target_name"] or row["base_url"] or "—",
+        "base_url": row["base_url"],
         "kind": row["kind"],
         "verdict": row["verdict"] or "—",
         "score": row["score"] if row["score"] is not None else "—",

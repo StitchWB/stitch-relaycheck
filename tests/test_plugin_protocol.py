@@ -208,3 +208,16 @@ def test_check_endpoint_validates_params(plugin: PluginProc) -> None:
         )
     assert excinfo.value.error["code"] == -32603
     plugin.request("plugin.shutdown")
+
+
+def test_verify_model_validates_params(plugin: PluginProc) -> None:
+    """verify_model without model and without targetId → JSON-RPC error."""
+    plugin.init()
+    plugin.request("plugin.ping")
+    with pytest.raises(RpcError) as excinfo:
+        plugin.request(
+            "plugin.call",
+            {"name": "verify_model", "params": {}},
+        )
+    assert excinfo.value.error["code"] == -32603
+    plugin.request("plugin.shutdown")
