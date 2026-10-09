@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Plugin runtime artifacts
+*.db
+*.sqlite3
+*.db-wal
+*.db-shm
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

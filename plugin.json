@@ -1,0 +1,522 @@
+{
+  "schema": "stitch.plugin/v2",
+  "id": "stitch-relaycheck",
+  "name": "RelayCheck",
+  "version": "0.1.0",
+  "service": "relaycheck",
+  "kind": "service",
+  "engine": {
+    "min": "0.3.0",
+    "api": 2
+  },
+  "depends": [],
+  "entry": {
+    "module": "stitch_relaycheck"
+  },
+  "capabilities": [],
+  "outputs": [],
+  "signature": "",
+  "description": {
+    "ru": "Локальный аудит AI-провайдеров и relay-станций: проверка подключения и моделей, определение протокола, латентность, история проверок и отчёты. Ключи шифруются at-rest (Fernet) и никогда не покидают машину; есть режим use-and-burn. Первый релиз: быстрый чек endpoint. Далее — fingerprint оригинальности модели, watering-detector и security-скан по правилам HoloNe.",
+    "en": "Local auditor for AI providers and relay stations: connectivity and model discovery, protocol detection, latency, check history and reports. Keys are encrypted at rest (Fernet) and never leave the machine; use-and-burn mode available. First release: quick endpoint check. Next: model authenticity fingerprinting, watering detection and HoloNe-rule security scan."
+  },
+  "author": "StitchWB",
+  "category": "ai-tools",
+  "status": "beta",
+  "icon": "🧪",
+  "features": [
+    {
+      "title": {
+        "ru": "Быстрый чек endpoint: подключение, протокол, список моделей, латентность",
+        "en": "Quick endpoint check: connectivity, protocol, model list, latency"
+      },
+      "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "Сохраняемые цели (relay) с шифрованием API-ключей",
+        "en": "Saved targets (relays) with encrypted API keys"
+      },
+      "status": "beta"
+    },
+    {
+      "title": {
+        "ru": "История проверок и markdown-отчёты локально",
+        "en": "Local check history and markdown reports"
+      },
+      "status": "beta"
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-10-09",
+      "changes": [
+        {
+          "ru": "Первый релиз: быстрый чек endpoint, цели с Fernet-шифрованием ключей, история, настройки",
+          "en": "Initial release: quick endpoint check, targets with Fernet-encrypted keys, history, settings"
+        }
+      ]
+    }
+  ],
+  "generated_by": {
+    "tool": "stitch_plugin_tools",
+    "scaffold": 3
+  },
+  "contributions": {
+    "commands": [
+      {
+        "name": "health_check",
+        "readonly": true
+      },
+      {
+        "name": "check_endpoint",
+        "readonly": false
+      },
+      {
+        "name": "save_target",
+        "readonly": false
+      },
+      {
+        "name": "list_targets",
+        "readonly": true
+      },
+      {
+        "name": "check_target",
+        "readonly": false
+      },
+      {
+        "name": "delete_target",
+        "readonly": false
+      },
+      {
+        "name": "list_reports",
+        "readonly": true
+      },
+      {
+        "name": "get_report",
+        "readonly": true
+      },
+      {
+        "name": "get_report_markdown",
+        "readonly": true
+      },
+      {
+        "name": "refresh",
+        "readonly": true
+      },
+      {
+        "name": "get_settings",
+        "readonly": true
+      },
+      {
+        "name": "set_settings",
+        "readonly": false
+      }
+    ],
+    "ui": {
+      "kind": "declarative",
+      "tabs": [
+        {
+          "id": "relaycheck",
+          "label": "stitch-relaycheck.tab",
+          "icon": "Activity",
+          "page": "main"
+        }
+      ],
+      "page": {
+        "title": "stitch-relaycheck.title",
+        "nodes": [
+          {
+            "kind": "heading",
+            "text": "stitch-relaycheck.title",
+            "level": 1
+          },
+          {
+            "kind": "section",
+            "title": "stitch-relaycheck.quick.title",
+            "nodes": [
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "qc-url",
+                "label": "stitch-relaycheck.quick.baseUrl",
+                "placeholder": "stitch-relaycheck.quick.baseUrlPlaceholder"
+              },
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "qc-key",
+                "label": "stitch-relaycheck.quick.apiKey",
+                "placeholder": "stitch-relaycheck.quick.apiKeyPlaceholder"
+              },
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "qc-model",
+                "label": "stitch-relaycheck.quick.model",
+                "placeholder": "stitch-relaycheck.quick.modelPlaceholder"
+              },
+              {
+                "kind": "button",
+                "id": "qc-btn",
+                "label": "stitch-relaycheck.quick.check",
+                "command": "check_endpoint",
+                "params": {
+                  "baseUrl": "",
+                  "apiKey": "",
+                  "model": ""
+                },
+                "paramsFrom": {
+                  "baseUrl": "qc-url",
+                  "apiKey": "qc-key",
+                  "model": "qc-model"
+                },
+                "variant": "primary"
+              }
+            ]
+          },
+          {
+            "kind": "section",
+            "title": "stitch-relaycheck.targets.title",
+            "nodes": [
+              {
+                "kind": "table",
+                "id": "targets",
+                "columns": [
+                  {
+                    "key": "name",
+                    "label": "stitch-relaycheck.targets.col.name"
+                  },
+                  {
+                    "key": "base_url",
+                    "label": "stitch-relaycheck.targets.col.baseUrl"
+                  },
+                  {
+                    "key": "key_mask",
+                    "label": "stitch-relaycheck.targets.col.key"
+                  },
+                  {
+                    "key": "last_verdict",
+                    "label": "stitch-relaycheck.targets.col.verdict"
+                  },
+                  {
+                    "key": "last_checked_at",
+                    "label": "stitch-relaycheck.targets.col.checked"
+                  }
+                ],
+                "source": {
+                  "command": "list_targets"
+                },
+                "rowActions": [
+                  {
+                    "id": "check-target-row",
+                    "label": "stitch-relaycheck.targets.check",
+                    "command": "check_target",
+                    "paramsFromRow": {
+                      "id": "id"
+                    }
+                  },
+                  {
+                    "id": "delete-target-row",
+                    "label": "stitch-relaycheck.targets.delete",
+                    "command": "delete_target",
+                    "variant": "danger",
+                    "paramsFromRow": {
+                      "id": "id"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "section",
+            "title": "stitch-relaycheck.addTarget.title",
+            "nodes": [
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "t-name",
+                "label": "stitch-relaycheck.addTarget.name"
+              },
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "t-url",
+                "label": "stitch-relaycheck.addTarget.baseUrl",
+                "placeholder": "https://relay.example.com/v1"
+              },
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "t-key",
+                "label": "stitch-relaycheck.addTarget.apiKey",
+                "placeholder": "stitch-relaycheck.addTarget.apiKeyPlaceholder"
+              },
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "t-note",
+                "label": "stitch-relaycheck.addTarget.note"
+              },
+              {
+                "kind": "field",
+                "field": "toggle",
+                "id": "t-persist",
+                "label": "stitch-relaycheck.addTarget.persistKey",
+                "value": true
+              },
+              {
+                "kind": "button",
+                "id": "t-save",
+                "label": "stitch-relaycheck.addTarget.save",
+                "command": "save_target",
+                "params": {
+                  "name": "",
+                  "baseUrl": "",
+                  "apiKey": "",
+                  "note": "",
+                  "persistKey": true
+                },
+                "paramsFrom": {
+                  "name": "t-name",
+                  "baseUrl": "t-url",
+                  "apiKey": "t-key",
+                  "note": "t-note",
+                  "persistKey": "t-persist"
+                },
+                "variant": "primary"
+              }
+            ]
+          },
+          {
+            "kind": "section",
+            "title": "stitch-relaycheck.history.title",
+            "nodes": [
+              {
+                "kind": "table",
+                "id": "reports",
+                "columns": [
+                  {
+                    "key": "created_at",
+                    "label": "stitch-relaycheck.history.col.date"
+                  },
+                  {
+                    "key": "target",
+                    "label": "stitch-relaycheck.history.col.target"
+                  },
+                  {
+                    "key": "kind",
+                    "label": "stitch-relaycheck.history.col.kind"
+                  },
+                  {
+                    "key": "verdict",
+                    "label": "stitch-relaycheck.history.col.verdict"
+                  },
+                  {
+                    "key": "score",
+                    "label": "stitch-relaycheck.history.col.score"
+                  },
+                  {
+                    "key": "latency_ms",
+                    "label": "stitch-relaycheck.history.col.latency"
+                  }
+                ],
+                "source": {
+                  "command": "list_reports"
+                },
+                "rowActions": [
+                  {
+                    "id": "refresh-reports-row",
+                    "label": "stitch-relaycheck.history.refresh",
+                    "command": "refresh",
+                    "paramsFromRow": {
+                      "reportId": "id"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "section",
+            "title": "stitch-relaycheck.report.title",
+            "nodes": [
+              {
+                "kind": "markdown",
+                "id": "last-report",
+                "source": {
+                  "command": "get_report_markdown",
+                  "params": {
+                    "reportId": "latest"
+                  }
+                },
+                "textKey": "text"
+              }
+            ]
+          },
+          {
+            "kind": "section",
+            "title": "stitch-relaycheck.settings.title",
+            "nodes": [
+              {
+                "kind": "field",
+                "field": "text",
+                "id": "s-timeout",
+                "label": "stitch-relaycheck.settings.timeout",
+                "value": "15"
+              },
+              {
+                "kind": "field",
+                "field": "toggle",
+                "id": "s-persist",
+                "label": "stitch-relaycheck.settings.persistKeys",
+                "value": true
+              },
+              {
+                "kind": "button",
+                "id": "s-save",
+                "label": "stitch-relaycheck.settings.save",
+                "command": "set_settings",
+                "params": {
+                  "timeoutSeconds": 15,
+                  "persistKeys": true
+                },
+                "paramsFrom": {
+                  "timeoutSeconds": "s-timeout",
+                  "persistKeys": "s-persist"
+                },
+                "variant": "secondary"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "i18n": {
+      "ru": {
+        "stitch-relaycheck": {
+          "title": "RelayCheck — аудит AI-провайдеров",
+          "tab": "RelayCheck",
+          "quick": {
+            "title": "Быстрый чек endpoint",
+            "baseUrl": "API Base URL",
+            "baseUrlPlaceholder": "https://relay.example.com/v1",
+            "apiKey": "API Key (не сохраняется)",
+            "apiKeyPlaceholder": "sk-... — только для этой проверки",
+            "model": "Модель (опционально)",
+            "modelPlaceholder": "например, claude-opus-4-8 — проверить наличие",
+            "check": "Проверить"
+          },
+          "targets": {
+            "title": "Мои цели (relay)",
+            "col": {
+              "name": "Имя",
+              "baseUrl": "Base URL",
+              "key": "Ключ",
+              "verdict": "Вердикт",
+              "checked": "Проверен"
+            },
+            "check": "Чек",
+            "delete": "Удалить"
+          },
+          "addTarget": {
+            "title": "Добавить цель",
+            "name": "Название",
+            "baseUrl": "Base URL",
+            "apiKey": "API Key",
+            "apiKeyPlaceholder": "ключ шифруется локально (Fernet)",
+            "note": "Заметка",
+            "persistKey": "Сохранить ключ (зашифрован)",
+            "save": "Сохранить цель"
+          },
+          "history": {
+            "title": "История проверок",
+            "col": {
+              "date": "Дата",
+              "target": "Цель",
+              "kind": "Тип",
+              "verdict": "Вердикт",
+              "score": "Скор",
+              "latency": "Латентность, мс"
+            },
+            "refresh": "Обновить"
+          },
+          "report": {
+            "title": "Последний отчёт"
+          },
+          "settings": {
+            "title": "Настройки",
+            "timeout": "Таймаут запросов, с",
+            "persistKeys": "Сохранять ключи целей (шифрованно)",
+            "save": "Сохранить настройки"
+          }
+        }
+      },
+      "en": {
+        "stitch-relaycheck": {
+          "title": "RelayCheck — AI provider audit",
+          "tab": "RelayCheck",
+          "quick": {
+            "title": "Quick endpoint check",
+            "baseUrl": "API Base URL",
+            "baseUrlPlaceholder": "https://relay.example.com/v1",
+            "apiKey": "API Key (not stored)",
+            "apiKeyPlaceholder": "sk-... — for this check only",
+            "model": "Model (optional)",
+            "modelPlaceholder": "e.g. claude-opus-4-8 — check availability",
+            "check": "Check"
+          },
+          "targets": {
+            "title": "My targets (relays)",
+            "col": {
+              "name": "Name",
+              "baseUrl": "Base URL",
+              "key": "Key",
+              "verdict": "Verdict",
+              "checked": "Checked"
+            },
+            "check": "Check",
+            "delete": "Delete"
+          },
+          "addTarget": {
+            "title": "Add target",
+            "name": "Name",
+            "baseUrl": "Base URL",
+            "apiKey": "API Key",
+            "apiKeyPlaceholder": "key is encrypted locally (Fernet)",
+            "note": "Note",
+            "persistKey": "Store key (encrypted)",
+            "save": "Save target"
+          },
+          "history": {
+            "title": "Check history",
+            "col": {
+              "date": "Date",
+              "target": "Target",
+              "kind": "Kind",
+              "verdict": "Verdict",
+              "score": "Score",
+              "latency": "Latency, ms"
+            },
+            "refresh": "Refresh"
+          },
+          "report": {
+            "title": "Latest report"
+          },
+          "settings": {
+            "title": "Settings",
+            "timeout": "Request timeout, s",
+            "persistKeys": "Store target keys (encrypted)",
+            "save": "Save settings"
+          }
+        }
+      }
+    },
+    "storage": {
+      "sqlite": true,
+      "migrations": "raw_sql"
+    }
+  }
+}

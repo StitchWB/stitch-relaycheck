@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: pip install pytest pytest-timeout httpx cryptography
+      - name: Validate manifest
+        run: |
+          python - <<'EOF'
+          import json, sys
+          with open("plugin.json", encoding="utf-8") as f:
+              m = json.load(f)
+          required = ["schema", "id", "name", "version", "kind", "entry"]
+          missing = [k for k in required if k not in m]
+          if missing:
+              sys.exit(f"plugin.json missing fields: {missing}")
+          if m["kind"] != "service":
+              sys.exit(f"expected kind=service, got {m['kind']!r}")
+          if not m["entry"].get("module"):
+              sys.exit("entry.module is required")
+          declared = {c["name"] for c in m["contributions"]["commands"]}
+          reserved = {"_migrate_db", "init", "ping", "shutdown"}
+          clash = declared & reserved
+          if clash:
+              sys.exit(f"reserved command names declared: {clash}")
+          print(f"manifest OK: {m['id']}@{m['version']} ({len(declared)} commands)")
+          EOF
+      - name: Run plugin tests
+        run: python -m pytest tests/ -q --timeout=60

@@ -1,0 +1,1 @@
+"""RelayCheck service plugin."""
