@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -90,6 +90,16 @@
     }
   ],
   "changelog": [
+    {
+      "version": "1.1.0",
+      "date": "2026-10-10",
+      "changes": [
+        {
+          "ru": "UX: кнопки обновляют таблицы после успеха, empty-состояния с подсказками, jobs поллингуется, confirm у holone, убраны мёртвый persistKeys и noop-Обновить; пустой отчёт отдаёт null (локализованный empty вместо английского текста); error-ключ в бизнес-ошибках.",
+          "en": "UX: buttons refresh tables on success, empty states with next-step hints, jobs table polls, holone gets confirm, dead persistKeys and noop Refresh removed; empty report returns null (localized empty instead of english text); error key on business failures."
+        }
+      ]
+    },
     {
       "version": "1.0.0",
       "date": "2026-10-09",
@@ -308,6 +318,7 @@
                 "id": "qc-btn",
                 "label": "stitch-relaycheck.quick.check",
                 "command": "check_endpoint",
+                "refreshOnSuccess": ["reports", "last-report"],
                 "params": {
                   "baseUrl": "",
                   "apiKey": "",
@@ -325,6 +336,7 @@
                 "id": "qc-fp-btn",
                 "label": "stitch-relaycheck.quick.fingerprint",
                 "command": "verify_model",
+                "refreshOnSuccess": ["reports", "last-report"],
                 "params": {
                   "baseUrl": "",
                   "apiKey": "",
@@ -342,6 +354,7 @@
                 "id": "qc-water-btn",
                 "label": "stitch-relaycheck.quick.water",
                 "command": "detect_watering",
+                "refreshOnSuccess": ["reports", "last-report"],
                 "params": {
                   "baseUrl": "",
                   "apiKey": "",
@@ -359,6 +372,7 @@
                 "id": "qc-scan-btn",
                 "label": "stitch-relaycheck.quick.scan",
                 "command": "scan_security",
+                "refreshOnSuccess": ["reports", "last-report"],
                 "params": {
                   "baseUrl": "",
                   "apiKey": "",
@@ -376,6 +390,7 @@
                 "id": "qc-audit-btn",
                 "label": "stitch-relaycheck.quick.audit",
                 "command": "start_audit_job",
+                "refreshOnSuccess": ["jobs"],
                 "params": {
                   "baseUrl": "",
                   "apiKey": "",
@@ -393,6 +408,8 @@
                 "id": "qc-holone-btn",
                 "label": "stitch-relaycheck.quick.holone",
                 "command": "holone_deep_scan",
+                "refreshOnSuccess": ["reports", "last-report"],
+                "confirm": "stitch-relaycheck.quick.holoneConfirm",
                 "params": {
                   "baseUrl": "",
                   "apiKey": "",
@@ -414,6 +431,7 @@
               {
                 "kind": "table",
                 "id": "targets",
+                "empty": "stitch-relaycheck.targets.empty",
                 "columns": [
                   {
                     "key": "name",
@@ -587,6 +605,7 @@
                 "id": "t-save",
                 "label": "stitch-relaycheck.addTarget.save",
                 "command": "save_target",
+                "refreshOnSuccess": ["targets"],
                 "params": {
                   "name": "",
                   "baseUrl": "",
@@ -614,6 +633,7 @@
               {
                 "kind": "table",
                 "id": "reports",
+                "empty": "stitch-relaycheck.history.empty",
                 "columns": [
                   {
                     "key": "created_at",
@@ -642,17 +662,7 @@
                 ],
                 "source": {
                   "command": "list_reports"
-                },
-                "rowActions": [
-                  {
-                    "id": "refresh-reports-row",
-                    "label": "stitch-relaycheck.history.refresh",
-                    "command": "refresh",
-                    "paramsFromRow": {
-                      "reportId": "id"
-                    }
-                  }
-                ]
+                }
               }
             ]
           },
@@ -663,6 +673,7 @@
               {
                 "kind": "table",
                 "id": "jobs",
+                "empty": "stitch-relaycheck.jobs.empty",
                 "columns": [
                   {
                     "key": "created_at",
@@ -682,18 +693,9 @@
                   }
                 ],
                 "source": {
-                  "command": "list_jobs"
-                },
-                "rowActions": [
-                  {
-                    "id": "refresh-jobs-row",
-                    "label": "stitch-relaycheck.jobs.refresh",
-                    "command": "refresh",
-                    "paramsFromRow": {
-                      "jobId": "id"
-                    }
-                  }
-                ]
+                  "command": "list_jobs",
+                  "refreshMs": 5000
+                }
               }
             ]
           },
@@ -704,6 +706,7 @@
               {
                 "kind": "markdown",
                 "id": "last-report",
+                "empty": "stitch-relaycheck.report.empty",
                 "source": {
                   "command": "get_report_markdown",
                   "params": {
@@ -726,24 +729,15 @@
                 "value": "15"
               },
               {
-                "kind": "field",
-                "field": "toggle",
-                "id": "s-persist",
-                "label": "stitch-relaycheck.settings.persistKeys",
-                "value": true
-              },
-              {
                 "kind": "button",
                 "id": "s-save",
                 "label": "stitch-relaycheck.settings.save",
                 "command": "set_settings",
                 "params": {
-                  "timeoutSeconds": 15,
-                  "persistKeys": true
+                  "timeoutSeconds": 15
                 },
                 "paramsFrom": {
-                  "timeoutSeconds": "s-timeout",
-                  "persistKeys": "s-persist"
+                  "timeoutSeconds": "s-timeout"
                 },
                 "variant": "secondary"
               }
@@ -770,10 +764,12 @@
             "water": "Водность ответов",
             "scan": "Скан безопасности",
             "audit": "Полный аудит",
-            "holone": "Holone deep scan"
+            "holone": "Holone deep scan",
+            "holoneConfirm": "Будет скачан и запущен внешний бинарник holone (проверка по SHA256). Продолжить?"
           },
           "targets": {
             "title": "Мои цели (relay)",
+            "empty": "Целей нет — добавьте relay в форме ниже",
             "col": {
               "name": "Имя",
               "baseUrl": "Base URL",
@@ -798,11 +794,11 @@
             "baseUrl": "Base URL",
             "apiKey": "API Key",
             "apiKeyPlaceholder": "ключ шифруется локально (Fernet)",
-            "model": "Модель по умолчанию",
+            "model": "Модель по умолчанию (используют кнопки Fingerprint/Вода/Аудит у цели)",
             "modelPlaceholder": "например, gpt-5 — для fingerprint по кнопке",
             "note": "Заметка",
-            "persistKey": "Сохранить ключ (зашифрован)",
-            "save": "Сохранить цель"
+            "persistKey": "Сохранить ключ (зашифрован) — без ключа проверки цели недоступны",
+            "save": "Сохранить цель (добавить relay)"
           },
           "history": {
             "title": "История проверок",
@@ -814,26 +810,26 @@
               "score": "Скор",
               "latency": "Латентность, мс"
             },
-            "refresh": "Обновить"
+            "empty": "Проверок ещё не было — запустите «Проверить» или аудит"
           },
           "report": {
-            "title": "Последний отчёт"
+            "title": "Последний отчёт",
+            "empty": "Отчётов пока нет — запустите проверку или аудит, результат появится здесь"
           },
           "settings": {
             "title": "Настройки",
             "timeout": "Таймаут запросов, с",
-            "persistKeys": "Сохранять ключи целей (шифрованно)",
-            "save": "Сохранить настройки"
+            "save": "Сохранить настройки плагина"
           },
           "jobs": {
-            "title": "Задачи (аудит)",
+            "title": "Фоновые задачи полного аудита",
+            "empty": "Фоновых задач нет — запустите «Полный аудит»",
             "col": {
               "date": "Дата",
               "target": "Цель",
               "status": "Статус",
               "progress": "Прогресс"
-            },
-            "refresh": "Обновить"
+            }
           }
         }
       },
@@ -854,10 +850,12 @@
             "water": "Watering check",
             "scan": "Security scan",
             "audit": "Full audit",
-            "holone": "Holone deep scan"
+            "holone": "Holone deep scan",
+            "holoneConfirm": "This downloads and runs the external holone binary (SHA256-verified). Continue?"
           },
           "targets": {
             "title": "My targets (relays)",
+            "empty": "No targets — add a relay in the form below",
             "col": {
               "name": "Name",
               "baseUrl": "Base URL",
@@ -882,11 +880,11 @@
             "baseUrl": "Base URL",
             "apiKey": "API Key",
             "apiKeyPlaceholder": "key is encrypted locally (Fernet)",
-            "model": "Default model",
+            "model": "Default model (used by the target's Fingerprint/Water/Audit buttons)",
             "modelPlaceholder": "e.g. gpt-5 — for the fingerprint button",
             "note": "Note",
-            "persistKey": "Store key (encrypted)",
-            "save": "Save target"
+            "persistKey": "Store key (encrypted) — target checks require a stored key",
+            "save": "Save target (add relay)"
           },
           "history": {
             "title": "Check history",
@@ -898,26 +896,26 @@
               "score": "Score",
               "latency": "Latency, ms"
             },
-            "refresh": "Refresh"
+            "empty": "No checks yet — run Check or an audit"
           },
           "report": {
-            "title": "Latest report"
+            "title": "Latest report",
+            "empty": "No reports yet — run a check or audit and the result will appear here"
           },
           "settings": {
             "title": "Settings",
             "timeout": "Request timeout, s",
-            "persistKeys": "Store target keys (encrypted)",
-            "save": "Save settings"
+            "save": "Save plugin settings"
           },
           "jobs": {
-            "title": "Jobs (audit)",
+            "title": "Full-audit background jobs",
+            "empty": "No jobs — start a Full audit",
             "col": {
               "date": "Date",
               "target": "Target",
               "status": "Status",
               "progress": "Progress"
-            },
-            "refresh": "Refresh"
+            }
           }
         }
       }

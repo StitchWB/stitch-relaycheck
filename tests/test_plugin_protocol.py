@@ -134,7 +134,7 @@ def test_plugin_protocol_roundtrip(plugin: PluginProc) -> None:
 
     settings = plugin.request("plugin.call", {"name": "get_settings", "params": {}})
     assert settings["settings"]["timeoutSeconds"] == 15
-    assert settings["settings"]["persistKeys"] is True
+    assert "persistKeys" not in settings["settings"]
 
     updated = plugin.request(
         "plugin.call",

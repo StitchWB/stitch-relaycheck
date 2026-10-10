@@ -37,7 +37,6 @@ from . import (
 #: Default plugin settings (overridable via ``set_settings``).
 DEFAULT_SETTINGS: dict[str, Any] = {
     "timeoutSeconds": 15,
-    "persistKeys": True,
 }
 
 
@@ -210,10 +209,12 @@ def check_target(db_path: str, target_id: str) -> dict[str, Any]:
         raise ValueError("id is required")
     target = storage.get_target(db_path, target_id)
     if target is None:
-        return {"success": False, "error_text": f"target {target_id!r} not found"}
+        return {"success": False, "error": f"target {target_id!r} not found",
+                "error_text": f"target {target_id!r} not found"}
     if not target.get("api_key_enc"):
         return {
             "success": False,
+            "error": "у цели нет сохранённого ключа (persistKey был выключен)",
             "error_text": "у цели нет сохранённого ключа (persistKey был выключен)",
         }
 
@@ -256,20 +257,25 @@ def get_report(db_path: str, report_id: str) -> dict[str, Any]:
     if report_id == "latest":
         rows = storage.list_reports(db_path, limit=1)
         if not rows:
-            return {"success": False, "error_text": "no reports yet"}
+            return {"success": False, "error": "no reports yet", "error_text": "no reports yet"}
         report = storage.get_report(db_path, rows[0]["id"])
     else:
         report = storage.get_report(db_path, report_id)
     if report is None:
-        return {"success": False, "error_text": f"report {report_id!r} not found"}
+        return {"success": False, "error": f"report {report_id!r} not found",
+                "error_text": f"report {report_id!r} not found"}
     return {"success": True, "report": report}
 
 
-def get_report_markdown(db_path: str, report_id: str = "latest") -> dict[str, Any]:
-    """Render a report as markdown (for the ``markdown`` UI node)."""
+def get_report_markdown(db_path: str, report_id: str = "latest") -> dict[str, Any] | None:
+    """Render a report as markdown (for the ``markdown`` UI node).
+
+    Returns ``None`` when there is no report so the UI node shows its
+    localized ``empty`` state instead of an english runtime string.
+    """
     outcome = get_report(db_path, report_id)
     if not outcome.get("success"):
-        return {"text": f"_{outcome.get('error_text', 'no report')}_"}
+        return None
     report = outcome["report"]
     if report["kind"] == "fingerprint":
         return {"text": _render_fingerprint_markdown(report)}
@@ -529,10 +535,12 @@ def verify_model(
     if target_id:
         target = storage.get_target(db_path, target_id)
         if target is None:
-            return {"success": False, "error_text": f"target {target_id!r} not found"}
+            return {"success": False, "error": f"target {target_id!r} not found",
+                    "error_text": f"target {target_id!r} not found"}
         if not target.get("api_key_enc"):
             return {
                 "success": False,
+                "error": "у цели нет сохранённого ключа (persistKey был выключен)",
                 "error_text": "у цели нет сохранённого ключа (persistKey был выключен)",
             }
         base_url = str(target["base_url"])

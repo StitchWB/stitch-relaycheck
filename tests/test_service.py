@@ -23,13 +23,12 @@ class TestSettings:
     def test_defaults(self, env):
         db_path = env
         s = service.get_settings(db_path)
-        assert s == {"timeoutSeconds": 15, "persistKeys": True}
+        assert s == {"timeoutSeconds": 15}
 
     def test_set_and_merge(self, env):
         db_path = env
         s = service.set_settings(db_path, {"timeoutSeconds": 30})
         assert s["timeoutSeconds"] == 30
-        assert s["persistKeys"] is True  # untouched
 
     def test_unknown_key_rejected(self, env):
         with pytest.raises(ValueError):
@@ -174,8 +173,7 @@ class TestReports:
         assert "**Модель доступна:** да" in md["text"]
 
     def test_markdown_empty(self, env):
-        md = service.get_report_markdown(env, "latest")
-        assert "no reports" in md["text"]
+        assert service.get_report_markdown(env, "latest") is None
 
 
 class TestCheckTarget:
