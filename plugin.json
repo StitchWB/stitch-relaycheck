@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -90,6 +90,13 @@
     }
   ],
   "changelog": [
+    {
+      "version": "1.1.1",
+      "date": "2026-10-26",
+      "changes": [
+        "Refresh vendored plugin runtime for the current host RPC contract"
+      ]
+    },
     {
       "version": "1.1.0",
       "date": "2026-10-10",
