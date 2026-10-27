@@ -15,8 +15,11 @@ from __future__ import annotations
 import json
 import os
 import select
+import socket
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -46,6 +49,40 @@ class PluginProc:
         )
         self._next_id = 0
         self.data_dir = data_dir
+        # Windows select() is sockets-only; the pump bridges pipe lines into a socketpair.
+        self._sock, self._pump_sock = socket.socketpair()
+        self._recv_buf = b""
+        self._pump = threading.Thread(target=self._pump_stdout, daemon=True)
+        self._pump.start()
+
+    def _pump_stdout(self) -> None:
+        assert self.proc.stdout is not None
+        try:
+            for raw in iter(self.proc.stdout.readline, ""):
+                self._pump_sock.sendall(raw.encode("utf-8"))
+        except OSError:
+            pass
+        finally:
+            try:
+                self._pump_sock.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    def _readline(self, deadline: float) -> str | None:
+        """One line from the transport; None on EOF, TimeoutError past deadline."""
+        while b"\n" not in self._recv_buf:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            ready, _, _ = select.select([self._sock], [], [], remaining)
+            if not ready:
+                raise TimeoutError
+            chunk = self._sock.recv(65536)
+            if not chunk:
+                return None
+            self._recv_buf += chunk
+        line, self._recv_buf = self._recv_buf.split(b"\n", 1)
+        return line.decode("utf-8")
 
     def request(self, method: str, params: dict | None = None, timeout: float = 15.0):
         """Send one request and wait for the response with the same id."""
@@ -58,24 +95,17 @@ class PluginProc:
         self.proc.stdin.write(line + "\n")
         self.proc.stdin.flush()
 
-        assert self.proc.stdout is not None
-        deadline_id = rid
-        import time
-
         deadline = time.monotonic() + timeout
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(f"no response for {method} (id={deadline_id})")
-            ready, _, _ = select.select([self.proc.stdout], [], [], remaining)
-            if not ready:
-                raise TimeoutError(f"no response for {method} (id={deadline_id})")
-            raw = self.proc.stdout.readline()
-            if not raw:
+            try:
+                raw = self._readline(deadline)
+            except TimeoutError:
+                raise TimeoutError(f"no response for {method} (id={rid})") from None
+            if raw is None:
                 stderr = self.proc.stderr.read() if self.proc.stderr else ""
                 raise RuntimeError(f"plugin exited while waiting for {method}: {stderr}")
             message = json.loads(raw)
-            if message.get("id") == deadline_id:
+            if message.get("id") == rid:
                 if "error" in message:
                     raise RpcError(message["error"])
                 return message.get("result")
@@ -101,6 +131,11 @@ class PluginProc:
             self.proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+        for sock in (self._sock, self._pump_sock):
+            try:
+                sock.close()
+            except OSError:
+                pass
 
 
 class RpcError(Exception):

@@ -53,7 +53,7 @@ class TestVerdictMap:
 
 @pytest.fixture()
 def fake_holone(tmp_path):
-    """A fake holone binary: shell script printing a canned scan JSON."""
+    """A fake holone binary printing a canned scan JSON (sh script; .cmd on Windows)."""
     payload = {
         "endpoint": "http://relay.example.com",
         "host": "relay.example.com",
@@ -66,14 +66,24 @@ def fake_holone(tmp_path):
         "probes": [{"name": "openai/no-tool", "status": "ok", "findings": 2}],
         "recommendations_ru": ["не используйте этого провайдера"],
     }
-    script = tmp_path / "holone-fake"
-    script.write_text(
-        "#!/bin/sh\n"
-        "echo 'progress line'\n"
-        f"echo '{json.dumps(payload)}'\n",
-        encoding="utf-8",
-    )
-    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    if os.name == "nt":
+        # Windows cannot exec a #!/bin/sh script; a .cmd batch stands in for the binary.
+        script = tmp_path / "holone-fake.cmd"
+        script.write_text(
+            "@echo off\r\n"
+            "echo progress line\r\n"
+            f"echo {json.dumps(payload)}\r\n",
+            encoding="ascii",
+        )
+    else:
+        script = tmp_path / "holone-fake"
+        script.write_text(
+            "#!/bin/sh\n"
+            "echo 'progress line'\n"
+            f"echo '{json.dumps(payload)}'\n",
+            encoding="utf-8",
+        )
+        script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return str(script)
 
 

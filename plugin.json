@@ -2,7 +2,7 @@
   "schema": "stitch.plugin/v2",
   "id": "stitch-relaycheck",
   "name": "RelayCheck",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "service": "relaycheck",
   "kind": "service",
   "engine": {
@@ -90,6 +90,13 @@
     }
   ],
   "changelog": [
+    {
+      "version": "1.1.2",
+      "date": "2026-10-26",
+      "changes": [
+        "Fix Windows-only test failures: socketpair-based protocol transport and a Windows-runnable holone fake binary"
+      ]
+    },
     {
       "version": "1.1.1",
       "date": "2026-10-26",
